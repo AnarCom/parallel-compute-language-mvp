@@ -4,3 +4,7 @@ build/
 .DS_Store
 .ccahe/
 .cache/
+CMakeFiles
+Testing
+*.cmake
+*.a
