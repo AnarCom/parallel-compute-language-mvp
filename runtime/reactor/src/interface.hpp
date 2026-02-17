@@ -13,9 +13,13 @@ using Pointer = std::shared_ptr<T>;
 template <typename T>
 using Maybe = std::optional<T>;
 
+class ChannelBase;
+
 class Object {
 public:
-    ~Object() noexcept;
+    virtual ~Object() noexcept;
+    int integer = 0;
+    Pointer<ChannelBase> channel = {};
 };
 
 using Objects = std::vector<Object>;
@@ -39,16 +43,9 @@ public:
 
     virtual void Push(Object message);
 
-    virtual Object Pop() noexcept;
-    virtual const Object Next() const noexcept;
-
-    virtual bool IsEmpty() const noexcept;
-    virtual size_t Length() const noexcept;
-
 private:
-Maybe<uint64_t> id;
-Pointer<Callback> callback;
-Maybe<std::queue<Object>> object_queue;
+    Maybe<uint64_t> id;
+    Pointer<Callback> callback;
 };
 
 using Channels = std::vector<Pointer<ChannelBase>>;
