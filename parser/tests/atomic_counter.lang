@@ -1,13 +1,16 @@
 func makeAtomicCounter(init int) (sync () int, async async int, async int) {
     var SyncGet sync () int
-    var AsyncGet async async int
+    var AsyncGet async async int // comment
     var Inc async int
     var Val async int
+    /*
+    Multi line comment
+    */
     join {
         case from Inc, from Val as val:
             Val <- val + 1
         case from SyncGet, from Val as val:
-            SyncGet <! val
+            SyncGet <| val
             Val <- val
         case from AsyncGet as ReplyCh, from Val as val:
             // Можно ли здесь объявить Join с участием ReplyCh?
