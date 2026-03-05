@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <queue>
 #include <optional>
@@ -13,42 +14,23 @@ using Pointer = std::shared_ptr<T>;
 template <typename T>
 using Maybe = std::optional<T>;
 
+class ChannelBase;
+
 class Object {
 public:
-    ~Object() noexcept;
+    virtual ~Object() noexcept;
+    int integer = 0;
+    Pointer<ChannelBase> channel = {};
 };
 
 using Objects = std::vector<Object>;
-
-class Callback {
-public:
-    ~Callback() noexcept;
-
-    virtual void OnMessage(uint64_t id, Object message) noexcept = 0;
-};
 
 class ChannelBase: public Object {
 public:
     virtual ~ChannelBase() noexcept;
 
-    void SetID(uint64_t id) noexcept;
-    Maybe<uint64_t> GetID() const noexcept;
-
-    void SetCallback(Pointer<Callback> callback) noexcept;
-    Pointer<Callback> GetCallback() const noexcept;
-
-    virtual void Push(Object message);
-
-    virtual Object Pop() noexcept;
-    virtual const Object Next() const noexcept;
-
-    virtual bool IsEmpty() const noexcept;
-    virtual size_t Length() const noexcept;
-
-private:
-Maybe<uint64_t> id;
-Pointer<Callback> callback;
-Maybe<std::queue<Object>> object_queue;
+    virtual void Push(Object message) = 0;
+    virtual Maybe<uint64_t> GetID() const noexcept = 0;
 };
 
 using Channels = std::vector<Pointer<ChannelBase>>;
@@ -57,14 +39,20 @@ class Runnable {
 public:
     virtual ~Runnable() noexcept;
 
-    virtual void Run(Objects inputs, Channels outputs) = 0;
+    virtual void operator()(Objects inputs) = 0;
 };
+
+using RunnableOrLambda = std::function<void (Objects)>;
 
 class Repository {
 public:
     virtual ~Repository() noexcept;
 
-    virtual void RegisterJoinCase(Channels inputs, Channels outputs, Pointer<Runnable> reaction) noexcept = 0;
+    /* currently outputs is an empty vector. Will be provided later for runtime optimization purposes */
+    virtual void RegisterJoinCase(Channels inputs, Channels outputs, Pointer<RunnableOrLambda> reaction) = 0;
+    virtual Pointer<ChannelBase> NewChannel() = 0;
+
+    virtual void Run(Pointer<RunnableOrLambda> reaction) = 0;
 };
 
 }  // namespace reactor
