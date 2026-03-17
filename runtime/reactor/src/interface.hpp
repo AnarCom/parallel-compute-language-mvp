@@ -1,36 +1,30 @@
 #pragma once
 
-#include <atomic>
-#include <memory>
-#include <queue>
-#include <optional>
-#include <vector>
+#include <functional>
+
+#include "type_system.hpp"
 
 namespace reactor {
 
-template <typename T>
-using Pointer = std::shared_ptr<T>;
-
-template <typename T>
-using Maybe = std::optional<T>;
-
-class ChannelBase;
-
-class Object {
+class ChannelBase : public ObjectValue {
 public:
-    virtual ~Object() noexcept;
-    int integer = 0;
-    Pointer<ChannelBase> channel = {};
-};
-
-using Objects = std::vector<Object>;
-
-class ChannelBase: public Object {
-public:
+    ChannelBase(ChannelMode mode, Type payload_type);
     virtual ~ChannelBase() noexcept;
 
-    virtual void Push(Object message) = 0;
+    virtual void Push(const Object& message) = 0;
     virtual Maybe<uint64_t> GetID() const noexcept = 0;
+
+    [[nodiscard]] ChannelMode mode() const noexcept;
+    [[nodiscard]] const Type& payload_type() const noexcept;
+    [[nodiscard]] bool Accepts(const Object& message) const noexcept;
+
+    ObjectKind kind() const noexcept override;
+    Type GetType() const override;
+    std::string ToString() const override;
+
+private:
+    ChannelMode mode_;
+    Type payload_type_;
 };
 
 using Channels = std::vector<Pointer<ChannelBase>>;
@@ -42,15 +36,14 @@ public:
     virtual void operator()(Objects inputs) = 0;
 };
 
-using RunnableOrLambda = std::function<void (Objects)>;
+using RunnableOrLambda = std::function<void(Objects)>;
 
 class Repository {
 public:
     virtual ~Repository() noexcept;
 
-    /* currently outputs is an empty vector. Will be provided later for runtime optimization purposes */
     virtual void RegisterJoinCase(Channels inputs, Channels outputs, Pointer<RunnableOrLambda> reaction) = 0;
-    virtual Pointer<ChannelBase> NewChannel() = 0;
+    virtual Pointer<ChannelBase> NewChannel(ChannelMode mode = ChannelMode::Async, Type payload_type = Type::Unit()) = 0;
 
     virtual void Run(Pointer<RunnableOrLambda> reaction) = 0;
 };
