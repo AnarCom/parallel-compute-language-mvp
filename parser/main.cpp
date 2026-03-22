@@ -34,11 +34,13 @@ int main(int argc, const char** argv) {
 
   Visitor visitor;
   visitor.WriteHeaders();
+  visitor.WriteGlobals();
   visitor.WritePredefinedFunctions();
   visitor.WriteFunctions(tree);
-  visitor.StartMain();
+  visitor.StartEntryFunc();
   visitor.visit(tree);
-  visitor.EndMain();
+  visitor.EndEntryFunc();
+  visitor.WriteMain();
 
   std::cout << "Compilation finished" << std::endl;
 

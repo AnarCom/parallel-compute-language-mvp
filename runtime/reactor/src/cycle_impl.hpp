@@ -62,6 +62,7 @@ private:
 
 class CycleRepository: public Repository {
 public:
+    CycleRepository();   
     static CycleRepository& GetRepository();
     void RegisterJoinCase(Channels inputs, Channels outputs, Pointer<RunnableOrLambda> reaction) override;
     Pointer<ChannelBase> NewChannel() override;
@@ -73,7 +74,7 @@ private:
     using QueuesMap = std::map<uint64_t, QueuePointer>;
 
     // methods
-    CycleRepository();
+    //CycleRepository();
 
     void RunRoutine() noexcept;
 

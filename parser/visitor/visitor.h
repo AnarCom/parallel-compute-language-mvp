@@ -4,6 +4,8 @@
 #include "generated/TParser.h"
 #include "generated/TParserVisitor.h"
 
+#include "stackframe.h"
+
 #include <generated/TParserBaseVisitor.h>
 
 #include <memory>
@@ -15,10 +17,12 @@ public:
     ~Visitor();
 
     void WriteHeaders();
+    void WriteGlobals();
     void WritePredefinedFunctions();
     void WriteFunctions(antlr4::tree::ParseTree* tree);
-    void StartMain();
-    void EndMain();
+    void StartEntryFunc();
+    void WriteMain();
+    void EndEntryFunc();
 
     virtual std::any visitJoinStmt(TParser::JoinStmtContext *ctx) override;
     virtual std::any visitVarDecl(TParser::VarDeclContext *ctx) override;
@@ -43,4 +47,5 @@ private:
     bool debug_ = false;
     bool functionsOnly_ = false;
     bool insideFunction_ = false;
+    StackFrame stackFrame_;
 };

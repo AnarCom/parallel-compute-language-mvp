@@ -14,7 +14,7 @@ include_directories(antlr4_runtime/src)
 add_subdirectory(antlr4_runtime)
 add_subdirectory(generated)
 
-add_executable(${PROJECT_NAME} main.cpp visitor/visitor.cpp)
+add_executable(${PROJECT_NAME} main.cpp visitor/visitor.cpp visitor/stackframe.cpp)
 
 target_link_libraries(${PROJECT_NAME} antlr4_static generated)
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR})

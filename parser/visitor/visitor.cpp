@@ -1,4 +1,5 @@
 #include "visitor.h"
+#include "visitor/stackframe.h"
 
 #include <any>
 #include <fstream>
@@ -23,12 +24,21 @@ Visitor::Visitor(std::string_view outFilePath) : out_(std::make_unique<std::ofst
 }
 
 void Visitor::WriteHeaders() {
-    GetOut() << "#include <runtime>" << std::endl << std::endl;
+    GetOut() << "#include <runtime/cycle_impl.hpp>" << std::endl << std::endl;
 
     GetOut() << "#include <iostream>" << std::endl;
+    GetOut() << "#include <memory>" << std::endl;
     GetOut() << "#include <tuple>" << std::endl;
 
     GetOut() << std::endl;
+
+    GetOut() << "using namespace reactor;" << std::endl;
+
+    GetOut() << std::endl;
+}
+
+void Visitor::WriteGlobals() {
+    GetOut() << "std::shared_ptr<Repository> repository__ = std::make_shared<CycleRepository>();" << std::endl << std::endl;
 }
 
 void Visitor::WritePredefinedFunctions() {
@@ -48,12 +58,22 @@ void Visitor::WriteFunctions(antlr4::tree::ParseTree* tree) {
     GetOut() << std::endl;
 }
 
-void Visitor::StartMain() {
-    GetOut() << "int main() { " << std::endl;
+void Visitor::StartEntryFunc() {
+    GetOut() << "void EntryFunc__() { " << std::endl;
+    stackFrame_.NewFrame("main");
     ++ indent_;
 }
 
-void Visitor::EndMain() {
+void Visitor::EndEntryFunc() {
+    --indent_;
+    GetOut() << "}" << std::endl << std::endl;
+    stackFrame_.Pop();
+}
+
+void Visitor::WriteMain() {
+    GetOut() << "int main() {" << std::endl;
+    ++indent_;
+    GetOutWithIndent() << "repository__->Run(std::make_shared<RunnableOrLambda>([](Objects){ EntryFunc__(); }));" << std::endl;
     GetOutWithIndent() << "return 0;" << std::endl;
     --indent_;
     GetOut() << "}" << std::endl;
@@ -71,44 +91,73 @@ std::ostream& Visitor::GetOut() {
 }
 
 std::any Visitor::visitJoinStmt(TParser::JoinStmtContext *ctx) {
+    stackFrame_.NewFrame("join"); // TODO: add source file line
     static std::size_t matchBlockId = 0;
-    GetOutWithIndent() << "REGISTER_JOIN;" << std::endl;
+
     for (TParser::MatchClauseContext* matchClause : ctx->matchClause()) {
+        std::vector<std::string> asVars;
+        std::vector<std::string> asVarsChannelNames;
+        std::string inputsName = "inputs" + std::to_string(matchBlockId) + "__";
+        GetOutWithIndent() << "Channels " << inputsName << "= {";
         for (TParser::FromChanAsContext* fromChanAsContext : matchClause->matchCase()->fromChanAs()) {
-             GetOutWithIndent() << "FROM " << fromChanAsContext->chanName->getText() << " TO " << (fromChanAsContext->varName ? fromChanAsContext->varName->getText() : "nil");
+            GetOut() << fromChanAsContext->chanName->getText();
+            if (fromChanAsContext != matchClause->matchCase()->fromChanAs().back()) {
+                GetOut() << ", ";
+            }
+            if (fromChanAsContext->varName) { 
+                asVars.push_back(fromChanAsContext->varName->getText());
+                asVarsChannelNames.push_back(fromChanAsContext->chanName->getText());
+            }
         }
+        GetOut() << "};" << std::endl;
         GetOutWithIndent() << std::endl;
         std::string matchBlockName = "match" + std::to_string(matchBlockId++);
-        GetOutWithIndent() << "auto " << matchBlockName << " = []() {" << std::endl; // TODO: capture and arguments
+        GetOutWithIndent() << "auto " << matchBlockName << " = std::make_shared<RunnableOrLambda>([=](Objects inp__) {" << std::endl; // TODO: capture and arguments
         ++indent_; 
+        std::size_t asIdx = 0;
+        for (std::size_t idx = 0; idx < asVars.size(); ++idx) {
+            const std::string& asVar = asVars[idx];
+            const std::string& asVarChannelName = asVarsChannelNames[idx];
+            auto channelType = stackFrame_.GetType(asVarChannelName);
+            if (!channelType) {
+                throw std::runtime_error("Channel " + asVarChannelName + " not define in scope");
+            }
+            auto underlyingType = channelType->GetUnderlyingType();
+            if (!underlyingType) {
+                throw std::runtime_error("Channel " + asVarChannelName + " has no underlying type. Implementation error.");
+            }
+            const std::string& channeMessageType = underlyingType->GetCppName();
+            GetOutWithIndent() << "auto " << asVar << " = inp__[" << asIdx++ << "].Get<" << channeMessageType << ">();" << std::endl;
+        }
         visit(matchClause->statementList());
         --indent_;
-        GetOutWithIndent() << "};" << std::endl;
-        GetOutWithIndent() << "REGISTER_MATCH " << matchBlockName << std::endl;
+        GetOutWithIndent() << "});" << std::endl;
+        GetOutWithIndent() << "repository__->RegisterJoinCase(std::move(" << inputsName <<"), {}, " << matchBlockName << ");" << std::endl;
         
     }
+    stackFrame_.Pop();
     return std::any{};
 }
 
 void Visitor::ProcessDefaultVarDecl(TParser::Type_Context* typeCtx, TParser::IdentifierListContext* identifierListCtx) {
     std::string typeName = "unknown_type";
     std::string typeConstructor = "()";
+    Type type(typeCtx);
     if (typeCtx->typeName()) {
         // Just type identifier
         // Just wrtie cpp stmt "type var;" but need to find type def and call correct constructor or return error
         typeName = typeCtx->typeName()->IDENTIFIER()->getText();
         typeConstructor = "()";
-        return;
     }
     else if (auto typeLitCtx = typeCtx->typeLit(); typeLitCtx) {
         // array, function, sync or async channel
         if (auto syncCtx = typeLitCtx->syncChannelType(); syncCtx) {
-            typeName = "CycleChannel";
-            typeConstructor = "()";
+            typeName = "ChannelPtr";
+            typeConstructor = "() //not implemented";
         }
         else if (auto asyncCtx = typeLitCtx->asyncChannelType(); asyncCtx) {
-            typeName = "CycleChannel";
-            typeConstructor = "()";
+            typeName = "ChannelPtr";
+            typeConstructor = " = repository__->NewChannel()";
         }
         else {
             // TODO: Process other types
@@ -120,6 +169,7 @@ void Visitor::ProcessDefaultVarDecl(TParser::Type_Context* typeCtx, TParser::Ide
     }
     for (auto id : identifierListCtx->IDENTIFIER()) {
         GetOutWithIndent() << typeName << " " << id->getText() << typeConstructor << ";" << std::endl;
+        stackFrame_.AddVariable(id->getText(), type);
     }
 }
 
@@ -146,10 +196,10 @@ std::string Visitor::GetCppType(TParser::Type_Context* typeCtx) {
     if (auto typeLitCtx = typeCtx->typeLit(); typeLitCtx) {
         // array, function, sync or async channel
         if (auto syncCtx = typeLitCtx->syncChannelType(); syncCtx) {
-            return "CycleChannel";
+            return "ChannelPtr";
         }
         else if (auto asyncCtx = typeLitCtx->asyncChannelType(); asyncCtx) {
-            return "CycleChannel";
+            return "ChannelPtr";
         }
         else {
             // TODO: Process other types
@@ -195,12 +245,15 @@ std::any Visitor::visitFunctionDecl(TParser::FunctionDeclContext *ctx) {
     // Writing function name
     GetOut() << ctx->IDENTIFIER()->getText();
 
+    stackFrame_.NewFrame(ctx->IDENTIFIER()->getText());
+
     {
         // Writing parameters
         GetOut() << "(";
         auto params = ctx->signature()->parameters()->parameterDecl();
         for (auto param = params.begin(); param != params.end(); ++param) {
             for (auto name : (*param)->identifierList()->IDENTIFIER()) {
+                stackFrame_.AddVariable(name->getText(), (*param)->type_()->getText());
                 GetOut() << GetCppType((*param)->type_()) << " ";
                 GetOut() << name->getText();
                 if (param + 1 != params.end()) {
@@ -219,6 +272,7 @@ std::any Visitor::visitFunctionDecl(TParser::FunctionDeclContext *ctx) {
     GetOut() << "{" << std::endl;
     ++indent_;
     auto res =  visitChildren(ctx->block());
+    stackFrame_.Pop();
     --indent_;
     GetOutWithIndent() << "}" << std::endl << std::endl;
     insideFunction_ = false;
@@ -247,7 +301,7 @@ std::any Visitor::visitEmitStmt(TParser::EmitStmtContext *ctx) {
     static std::size_t helpingIndex = 0;
     GetOutWithIndent() << "auto emitExprRightRes" << helpingIndex << " = " << ctx->expression(1)->getText() << ";" << std::endl;
     std::string channelName = ctx->expression(0)->getText(); // only variable name for the first time without expr computation
-    GetOutWithIndent() << channelName << ".send(emitExprRightRes" << (helpingIndex++) << ");"  << std::endl;
+    GetOutWithIndent() << channelName << "->Push(emitExprRightRes" << (helpingIndex++) << ");"  << std::endl;
     return std::any{};
 }
 
@@ -297,7 +351,7 @@ std::any Visitor::visitShortVarDecl(TParser::ShortVarDeclContext *ctx) {
     GetOutWithIndent() << "std::tuple " << tupleName << " = " << exprs[0]->getText() << ";" << std::endl;
     std::size_t idNum = 0;
     for (auto id : ids) {
-        GetOutWithIndent() << "auto " << id->getText() << " = " << "std::move(" << tupleName << "[" << (idNum++) << "]);" << std::endl;
+        GetOutWithIndent() << "auto " << id->getText() << " = " << "std::move(std::get<" << (idNum++) << ">(" << tupleName <<"));" << std::endl;
     }
     return std::any{};
 }
