@@ -32,7 +32,7 @@ int main(int argc, const char** argv) {
   TParser parser(&tokens);
   tree::ParseTree* tree = parser.sourceFile();
 
-  std::string outFilePath = argv[1];
+  std::string outFilePath(argv[2]);
 
   Visitor visitor(outFilePath);
   visitor.WriteHeaders();
@@ -43,8 +43,6 @@ int main(int argc, const char** argv) {
   visitor.visit(tree);
   visitor.EndEntryFunc();
   visitor.WriteMain();
-
-  std::cout << "Compilation finished" << std::endl;
 
   return 0;
 }
