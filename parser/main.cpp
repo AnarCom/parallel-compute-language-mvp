@@ -32,7 +32,9 @@ int main(int argc, const char** argv) {
   TParser parser(&tokens);
   tree::ParseTree* tree = parser.sourceFile();
 
-  Visitor visitor;
+  std::string outFilePath = argv[1];
+
+  Visitor visitor(outFilePath);
   visitor.WriteHeaders();
   visitor.WriteGlobals();
   visitor.WritePredefinedFunctions();

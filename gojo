@@ -1,0 +1,21 @@
+#! /bin/sh
+
+# $1 file.gojo path
+
+if [ -z "$GOJO_PATH" ]; then
+    echo "GOJO_PATH is not set"
+    exit 1
+fi
+
+gojo_source_file = $1
+out_file = $2
+
+mkdir tmp
+$GOJO_PATH/parser $gojo_source_file tmp/$out_file.cpp
+
+clang++ tmp/$cpp_source_file --std=c++20 -L $GOJO_PATH -I $GOJO_PATH -l LibReactor -o $out_file
+
+// check if no parameter --tmp then remove tmp dir
+if [ $2 != "--tmp" ]; then
+    rm -rf tmp
+fi

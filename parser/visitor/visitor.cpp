@@ -24,7 +24,7 @@ Visitor::Visitor(std::string_view outFilePath) : out_(std::make_unique<std::ofst
 }
 
 void Visitor::WriteHeaders() {
-    GetOut() << "#include <runtime/cycle_impl.hpp>" << std::endl << std::endl;
+    GetOut() << "#include <cycle_impl.hpp>" << std::endl << std::endl;
 
     GetOut() << "#include <iostream>" << std::endl;
     GetOut() << "#include <memory>" << std::endl;
