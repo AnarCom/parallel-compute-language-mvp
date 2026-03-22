@@ -87,6 +87,8 @@ DECLARE_ASSIGN : ':=';
 LOGICAL_OR  : '||';
 LOGICAL_AND : '&&';
 
+SYNC_RETURN : '<|';
+
 // Relation operators
 
 EQUALS            : '==';
@@ -118,7 +120,6 @@ CARET     : '^';
 STAR      : '*';
 AMPERSAND : '&';
 EMIT      : '<-';
-SYNC_RETURN : '<|';
 
 // Number literals
 

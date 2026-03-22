@@ -1,0 +1,31 @@
+#! /bin/sh -i
+
+# $1 file.gojo path
+
+if [ -z "$GOJO_PATH" ]; then
+    echo "GOJO_PATH is not set"
+    exit 1
+fi
+
+export gojo_source_file=$1
+export out_file=$2
+
+mkdir -p tmp
+echo "Translating GoJo source file to C++..."
+$GOJO_PATH/parser $gojo_source_file $(pwd)/tmp/$out_file.cpp
+
+# Check use clang++ or g++
+export compiler="clang++"
+if [ -z "$(which clang++)" ]; then
+    # Use g++
+    export compiler="g++"
+fi
+
+echo "Compiling C++ source file..."
+$compiler tmp/$out_file.cpp --std=c++20 -L $GOJO_PATH -I $GOJO_PATH/include/ -l Reactor -o $out_file
+
+echo "Compilation finished"
+
+if [[ -z $3 || $3 != "--tmp" ]]; then
+    rm -rf tmp
+fi
