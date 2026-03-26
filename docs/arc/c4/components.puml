@@ -1,0 +1,30 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title C4-3 Components - Worker
+
+Container_Boundary(w, "Worker (one replica)") {
+
+  Component(loop, "Partition Event Loop", "Runtime core", "Single-threaded per assigned partition: poll -> enqueue -> match -> execute -> transactional produce")
+  Component(consumer, "Kafka Consumer", "Kafka client", "Fetches token records from assigned partitions")
+  Component(txnProd, "Kafka Txn Producer", "Kafka client", "Transactional produce of output tokens + commit offsets in same transaction")
+  Component(codec, "Tokens Codec", "Runtime module", "Encodes/decodes token messages (key, channel_id, event_id, payload)")
+  Component(state, "In-Memory Join State", "Runtime module", "queues[channel_id][key] = FIFO deque<Token>")
+  Component(matcher, "Matcher", "Runtime module", "Incremental rule enablement; conflict resolution by priority; FIFO token consumption")
+  Component(exec, "Reactions Executor", "Runtime module", "Runs handlers; computes reactionExecutionId; buffers emitted output tokens")
+  Component(meta, "Rules Registry", "Runtime module", "Holds compiled rules, priorities, rulesByChannel index")
+
+
+  Rel(loop, consumer, "Polls via")
+  Rel(loop, codec, "Decodes input; encodes output using")
+  Rel(loop, state, "Updates and reads")
+  Rel(loop, matcher, "Invokes matching on state changes")
+  Rel(loop, exec, "Executes scheduled firings")
+  Rel(loop, txnProd, "Begins/commits transactions; commits offsets")
+  Rel(matcher, meta, "Uses rule registry/index")
+  Rel(matcher, state, "Checks availability; pops FIFO tokens from")
+}
+
+System_Ext(kafka, "Kafka Cluster", "domain.tokens topic; transactions; consumer groups")
+Rel(consumer, kafka, "Fetch records from", "Kafka protocol")
+Rel(txnProd, kafka, "Produce/commit transaction to", "Kafka protocol")
+@enduml
