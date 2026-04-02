@@ -21,6 +21,7 @@ public:
     ObjectKind kind() const noexcept override;
     Type GetType() const override;
     std::string ToString() const override;
+    std::string Serialize() const override;
 
 private:
     ChannelMode mode_;

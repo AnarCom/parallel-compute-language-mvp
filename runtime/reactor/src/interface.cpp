@@ -34,6 +34,37 @@ std::string ChannelBase::ToString() const {
     return "<channel: " + GetType().ToString() + ">";
 }
 
+std::string ChannelBase::Serialize() const {
+    auto id = GetID();
+    if (id.has_value()) {
+        return "channel:" + std::to_string(*id) + ":" + GetType().Serialize();
+    }
+    return "channel:unregistered:" + GetType().Serialize();
+}
+
+// ChannelObject implementation
+ChannelObject::ChannelObject(Pointer<ChannelBase> channel) noexcept : channel_(std::move(channel)) {}
+
+ObjectKind ChannelObject::kind() const noexcept {
+    return ObjectKind::Channel;
+}
+
+Type ChannelObject::GetType() const {
+    return channel_->GetType();
+}
+
+std::string ChannelObject::ToString() const {
+    return channel_->ToString();
+}
+
+std::string ChannelObject::Serialize() const {
+    return channel_->Serialize();
+}
+
+const Pointer<ChannelBase>& ChannelObject::channel() const noexcept {
+    return channel_;
+}
+
 Runnable::~Runnable() noexcept = default;
 
 Repository::~Repository() noexcept = default;

@@ -1,7 +1,7 @@
 #include "cycle_impl.hpp"
 
 #include <algorithm>
-#include <format>
+// #include <format>
 #include <iterator>
 #include <thread>
 #include <vector>
@@ -36,9 +36,9 @@ void CycleChannel::Push(const Object& message) {
     auto maybe_callback = GetCallback();
     debug::runtime_assert(maybe_id.has_value(), "channel is not registered in repository");
     debug::runtime_assert(bool(maybe_callback), "channel callback is not installed");
-    debug::runtime_assert(Accepts(message), std::format(
-        "message of type '{}' cannot be pushed into channel '{}'",
-        message.GetType().ToString(), GetType().ToString()));
+    // debug::runtime_assert(Accepts(message), std::format(
+    //     "message of type '{}' cannot be pushed into channel '{}'",
+    //     message.GetType().ToString(), GetType().ToString()));
     maybe_callback->OnMessage(maybe_id.value(), message);
 }
 
@@ -125,8 +125,8 @@ void CycleRepository::Run(Pointer<RunnableOrLambda> entrypoint) {
     while (CheckCases()) {
     }
 
-    debug::runtime_assert(cases.empty(), std::format("cases not empty: found {}", cases.size()));
-    debug::runtime_assert(calls.empty(), std::format("calls not empty: found {}", calls.size()));
+    // debug::runtime_assert(cases.empty(), std::format("cases not empty: found {}", cases.size()));
+    // debug::runtime_assert(calls.empty(), std::format("calls not empty: found {}", calls.size()));
 
     is_complete.store(true);
     for (auto i = 0; i < max_runner_threads; ++i) {

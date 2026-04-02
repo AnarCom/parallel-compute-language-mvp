@@ -1,7 +1,11 @@
 #include "type_system.hpp"
+#include "interface.hpp"
 
 #include <sstream>
 #include <stdexcept>
+#include <ostream>
+#include <functional>
+#include <cctype>
 
 namespace reactor {
 namespace {
@@ -22,6 +26,45 @@ std::string JoinStrings(const std::vector<std::string>& parts, const std::string
             out << separator;
         }
         out << parts[i];
+    }
+    return out.str();
+}
+
+size_t HashCombine(size_t seed, size_t hash) noexcept {
+    // Based on boost::hash_combine
+    return seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+}
+
+std::string EscapeString(const std::string& str) {
+    std::ostringstream out;
+    for (char c : str) {
+        switch (c) {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default: out << c; break;
+        }
+    }
+    return out.str();
+}
+
+std::string UnescapeString(const std::string& str) {
+    std::ostringstream out;
+    for (size_t i = 0; i < str.size(); ++i) {
+        if (str[i] == '\\' && i + 1 < str.size()) {
+            switch (str[i + 1]) {
+                case '"': out << '"'; ++i; break;
+                case '\\': out << '\\'; ++i; break;
+                case 'n': out << '\n'; ++i; break;
+                case 'r': out << '\r'; ++i; break;
+                case 't': out << '\t'; ++i; break;
+                default: out << str[i]; break;
+            }
+        } else {
+            out << str[i];
+        }
     }
     return out.str();
 }
@@ -50,6 +93,14 @@ bool PrimitiveTypeNode::IsConcrete() const noexcept {
     return true;
 }
 
+size_t PrimitiveTypeNode::Hash() const noexcept {
+    return std::hash<int>{}(static_cast<int>(kind_));
+}
+
+std::string PrimitiveTypeNode::Serialize() const {
+    return ToString();
+}
+
 VariableTypeNode::VariableTypeNode(std::string name) noexcept : name_(std::move(name)) {}
 
 TypeKind VariableTypeNode::kind() const noexcept {
@@ -67,6 +118,15 @@ std::string VariableTypeNode::ToString() const {
 
 bool VariableTypeNode::IsConcrete() const noexcept {
     return false;
+}
+
+size_t VariableTypeNode::Hash() const noexcept {
+    size_t h = std::hash<int>{}(static_cast<int>(TypeKind::Variable));
+    return HashCombine(h, std::hash<std::string>{}(name_));
+}
+
+std::string VariableTypeNode::Serialize() const {
+    return "'" + name_;
 }
 
 const std::string& VariableTypeNode::name() const noexcept {
@@ -102,6 +162,23 @@ bool TupleTypeNode::IsConcrete() const noexcept {
     return true;
 }
 
+size_t TupleTypeNode::Hash() const noexcept {
+    size_t h = std::hash<int>{}(static_cast<int>(TypeKind::Tuple));
+    for (const auto& element : elements_) {
+        h = HashCombine(h, element.Hash());
+    }
+    return h;
+}
+
+std::string TupleTypeNode::Serialize() const {
+    std::vector<std::string> parts;
+    parts.reserve(elements_.size());
+    for (const auto& element : elements_) {
+        parts.push_back(element.Serialize());
+    }
+    return "(" + JoinStrings(parts, ",") + ")";
+}
+
 const std::vector<Type>& TupleTypeNode::elements() const noexcept {
     return elements_;
 }
@@ -123,6 +200,15 @@ std::string ListTypeNode::ToString() const {
 
 bool ListTypeNode::IsConcrete() const noexcept {
     return element_type_.IsConcrete();
+}
+
+size_t ListTypeNode::Hash() const noexcept {
+    size_t h = std::hash<int>{}(static_cast<int>(TypeKind::List));
+    return HashCombine(h, element_type_.Hash());
+}
+
+std::string ListTypeNode::Serialize() const {
+    return "[" + element_type_.Serialize() + "]";
 }
 
 const Type& ListTypeNode::element_type() const noexcept {
@@ -147,6 +233,17 @@ std::string ChannelTypeNode::ToString() const {
 
 bool ChannelTypeNode::IsConcrete() const noexcept {
     return payload_type_.IsConcrete();
+}
+
+size_t ChannelTypeNode::Hash() const noexcept {
+    size_t h = std::hash<int>{}(static_cast<int>(TypeKind::Channel));
+    h = HashCombine(h, std::hash<int>{}(static_cast<int>(mode_)));
+    return HashCombine(h, payload_type_.Hash());
+}
+
+std::string ChannelTypeNode::Serialize() const {
+    std::string mode_str = (mode_ == ChannelMode::Sync) ? "sync" : "async";
+    return "channel<" + mode_str + "," + payload_type_.Serialize() + ">";
 }
 
 ChannelMode ChannelTypeNode::mode() const noexcept {
@@ -188,6 +285,27 @@ bool AlgebraicTypeNode::IsConcrete() const noexcept {
         }
     }
     return true;
+}
+
+size_t AlgebraicTypeNode::Hash() const noexcept {
+    size_t h = std::hash<int>{}(static_cast<int>(TypeKind::Algebraic));
+    h = HashCombine(h, std::hash<std::string>{}(name_));
+    for (const auto& parameter : parameters_) {
+        h = HashCombine(h, parameter.Hash());
+    }
+    return h;
+}
+
+std::string AlgebraicTypeNode::Serialize() const {
+    if (parameters_.empty()) {
+        return name_;
+    }
+    std::vector<std::string> parts;
+    parts.reserve(parameters_.size());
+    for (const auto& parameter : parameters_) {
+        parts.push_back(parameter.Serialize());
+    }
+    return name_ + "<" + JoinStrings(parts, ",") + ">";
 }
 
 const std::string& AlgebraicTypeNode::name() const noexcept {
@@ -299,6 +417,95 @@ const Pointer<const detail::TypeNode>& Type::Raw() const noexcept {
     return node_;
 }
 
+std::string Type::Serialize() const {
+    return node_->Serialize();
+}
+
+Type Type::Deserialize(const std::string& serialized) {
+    if (serialized.empty()) {
+        throw std::invalid_argument("Cannot deserialize empty string");
+    }
+
+    // Handle primitive types
+    if (serialized == "nil") return Type::Unit();
+    if (serialized == "int") return Type::Int();
+    if (serialized == "bool") return Type::Bool();
+    if (serialized == "string") return Type::String();
+
+    // Handle type variables (start with ')
+    if (serialized[0] == '\'') {
+        return Type::Variable(serialized.substr(1));
+    }
+
+    // Handle list types [T]
+    if (serialized[0] == '[' && serialized.back() == ']') {
+        std::string inner = serialized.substr(1, serialized.size() - 2);
+        return Type::List(Deserialize(inner));
+    }
+
+    // Handle tuple types (T1,T2,...)
+    if (serialized[0] == '(' && serialized.back() == ')') {
+        std::string inner = serialized.substr(1, serialized.size() - 2);
+        std::vector<Type> elements;
+        size_t depth = 0;
+        size_t start = 0;
+        for (size_t i = 0; i < inner.size(); ++i) {
+            if (inner[i] == '(' || inner[i] == '[' || inner[i] == '<') ++depth;
+            if (inner[i] == ')' || inner[i] == ']' || inner[i] == '>') --depth;
+            if (depth == 0 && inner[i] == ',') {
+                elements.push_back(Deserialize(inner.substr(start, i - start)));
+                start = i + 1;
+            }
+        }
+        if (start < inner.size()) {
+            elements.push_back(Deserialize(inner.substr(start)));
+        }
+        return Type::Tuple(std::move(elements));
+    }
+
+    // Handle channel types channel<mode,payload>
+    if (serialized.substr(0, 8) == "channel<" && serialized.back() == '>') {
+        std::string inner = serialized.substr(8, serialized.size() - 9);
+        size_t comma_pos = inner.find(',');
+        if (comma_pos == std::string::npos) {
+            throw std::invalid_argument("Invalid channel type serialization");
+        }
+        std::string mode_str = inner.substr(0, comma_pos);
+        std::string payload_str = inner.substr(comma_pos + 1);
+        ChannelMode mode = (mode_str == "sync") ? ChannelMode::Sync : ChannelMode::Async;
+        return Type::Channel(mode, Deserialize(payload_str));
+    }
+
+    // Handle algebraic types Name or Name<T1,T2,...>
+    size_t angle_pos = serialized.find('<');
+    if (angle_pos != std::string::npos && serialized.back() == '>') {
+        std::string name = serialized.substr(0, angle_pos);
+        std::string inner = serialized.substr(angle_pos + 1, serialized.size() - angle_pos - 2);
+        std::vector<Type> parameters;
+        size_t depth = 0;
+        size_t start = 0;
+        for (size_t i = 0; i < inner.size(); ++i) {
+            if (inner[i] == '(' || inner[i] == '[' || inner[i] == '<') ++depth;
+            if (inner[i] == ')' || inner[i] == ']' || inner[i] == '>') --depth;
+            if (depth == 0 && inner[i] == ',') {
+                parameters.push_back(Deserialize(inner.substr(start, i - start)));
+                start = i + 1;
+            }
+        }
+        if (start < inner.size()) {
+            parameters.push_back(Deserialize(inner.substr(start)));
+        }
+        return Type::Algebraic(name, std::move(parameters));
+    }
+
+    // Otherwise it's a simple algebraic type name
+    return Type::Algebraic(serialized);
+}
+
+size_t Type::Hash() const noexcept {
+    return node_->Hash();
+}
+
 bool operator==(const Type& lhs, const Type& rhs) noexcept {
     if (lhs.node_ == rhs.node_) {
         return true;
@@ -327,6 +534,10 @@ std::string UnitObject::ToString() const {
     return "nil";
 }
 
+std::string UnitObject::Serialize() const {
+    return "unit:nil";
+}
+
 IntObject::IntObject(std::int64_t value) noexcept : value_(value) {}
 
 ObjectKind IntObject::kind() const noexcept {
@@ -339,6 +550,10 @@ Type IntObject::GetType() const {
 
 std::string IntObject::ToString() const {
     return std::to_string(value_);
+}
+
+std::string IntObject::Serialize() const {
+    return "int:" + std::to_string(value_);
 }
 
 std::int64_t IntObject::value() const noexcept {
@@ -359,6 +574,10 @@ std::string BoolObject::ToString() const {
     return value_ ? "true" : "false";
 }
 
+std::string BoolObject::Serialize() const {
+    return value_ ? "bool:true" : "bool:false";
+}
+
 bool BoolObject::value() const noexcept {
     return value_;
 }
@@ -375,6 +594,10 @@ Type StringObject::GetType() const {
 
 std::string StringObject::ToString() const {
     return '"' + value_ + '"';
+}
+
+std::string StringObject::Serialize() const {
+    return "string:\"" + EscapeString(value_) + "\"";
 }
 
 const std::string& StringObject::value() const noexcept {
@@ -405,6 +628,15 @@ std::string TupleObject::ToString() const {
     return "(" + JoinStrings(parts, ", ") + ")";
 }
 
+std::string TupleObject::Serialize() const {
+    std::vector<std::string> parts;
+    parts.reserve(elements_.size());
+    for (const auto& element : elements_) {
+        parts.push_back(element.Serialize());
+    }
+    return "tuple:(" + JoinStrings(parts, ",") + ")";
+}
+
 const Objects& TupleObject::elements() const noexcept {
     return elements_;
 }
@@ -427,6 +659,15 @@ std::string ListObject::ToString() const {
         parts.push_back(element.ToString());
     }
     return "[" + JoinStrings(parts, ", ") + "]";
+}
+
+std::string ListObject::Serialize() const {
+    std::vector<std::string> parts;
+    parts.reserve(elements_.size());
+    for (const auto& element : elements_) {
+        parts.push_back(element.Serialize());
+    }
+    return "list:[" + JoinStrings(parts, ",") + "]:" + element_type_.Serialize();
 }
 
 const Objects& ListObject::elements() const noexcept {
@@ -481,6 +722,15 @@ std::string AlgebraicObject::ToString() const {
     return constructor_name_ + "(" + JoinStrings(parts, ", ") + ")";
 }
 
+std::string AlgebraicObject::Serialize() const {
+    std::vector<std::string> parts;
+    parts.reserve(fields_.size());
+    for (const auto& field : fields_) {
+        parts.push_back(field.Serialize());
+    }
+    return "adt:" + algebraic_type_.Serialize() + ":" + constructor_name_ + ":(" + JoinStrings(parts, ",") + ")";
+}
+
 const Type& AlgebraicObject::algebraic_type() const noexcept {
     return algebraic_type_;
 }
@@ -529,6 +779,10 @@ Object Object::Algebraic(Type algebraic_type, std::string constructor_name, Obje
     return Object(std::make_shared<AlgebraicObject>(std::move(algebraic_type), std::move(constructor_name), std::move(fields)));
 }
 
+Object Object::Channel(Pointer<ChannelBase> channel) {
+    return Object(std::make_shared<ChannelObject>(std::move(channel)));
+}
+
 ObjectKind Object::kind() const noexcept {
     return value_->kind();
 }
@@ -547,6 +801,287 @@ bool Object::IsNull() const noexcept {
 
 const Pointer<ObjectValue>& Object::Raw() const noexcept {
     return value_;
+}
+
+std::int64_t Object::AsInt() const {
+    auto int_obj = As<IntObject>();
+    if (!int_obj) {
+        throw std::logic_error("Object is not an Int");
+    }
+    return int_obj->value();
+}
+
+bool Object::AsBool() const {
+    auto bool_obj = As<BoolObject>();
+    if (!bool_obj) {
+        throw std::logic_error("Object is not a Bool");
+    }
+    return bool_obj->value();
+}
+
+const std::string& Object::AsString() const {
+    auto string_obj = As<StringObject>();
+    if (!string_obj) {
+        throw std::logic_error("Object is not a String");
+    }
+    return string_obj->value();
+}
+
+const Objects& Object::AsTuple() const {
+    auto tuple_obj = As<TupleObject>();
+    if (!tuple_obj) {
+        throw std::logic_error("Object is not a Tuple");
+    }
+    return tuple_obj->elements();
+}
+
+const Objects& Object::AsList() const {
+    auto list_obj = As<ListObject>();
+    if (!list_obj) {
+        throw std::logic_error("Object is not a List");
+    }
+    return list_obj->elements();
+}
+
+Pointer<ChannelBase> Object::AsChannel() const {
+    auto channel_obj = As<ChannelObject>();
+    if (!channel_obj) {
+        throw std::logic_error("Object is not a Channel");
+    }
+    return channel_obj->channel();
+}
+
+std::string Object::Serialize() const {
+    return value_->Serialize();
+}
+
+Object Object::Deserialize(const std::string& serialized) {
+    if (serialized.empty()) {
+        throw std::invalid_argument("Cannot deserialize empty string");
+    }
+
+    size_t colon_pos = serialized.find(':');
+    if (colon_pos == std::string::npos) {
+        throw std::invalid_argument("Invalid object serialization format");
+    }
+
+    std::string kind_str = serialized.substr(0, colon_pos);
+    std::string data = serialized.substr(colon_pos + 1);
+
+    if (kind_str == "unit") {
+        return Object::Unit();
+    } else if (kind_str == "int") {
+        return Object::Int(std::stoll(data));
+    } else if (kind_str == "bool") {
+        return Object::Bool(data == "true");
+    } else if (kind_str == "string") {
+        if (data.size() < 2 || data.front() != '"' || data.back() != '"') {
+            throw std::invalid_argument("Invalid string serialization");
+        }
+        return Object::String(UnescapeString(data.substr(1, data.size() - 2)));
+    } else if (kind_str == "tuple") {
+        if (data.size() < 2 || data.front() != '(' || data.back() != ')') {
+            throw std::invalid_argument("Invalid tuple serialization");
+        }
+        std::string inner = data.substr(1, data.size() - 2);
+        Objects elements;
+        size_t depth = 0;
+        size_t start = 0;
+        for (size_t i = 0; i < inner.size(); ++i) {
+            if (inner[i] == '(' || inner[i] == '[') ++depth;
+            if (inner[i] == ')' || inner[i] == ']') --depth;
+            if (depth == 0 && inner[i] == ',') {
+                elements.push_back(Deserialize(inner.substr(start, i - start)));
+                start = i + 1;
+            }
+        }
+        if (start < inner.size()) {
+            elements.push_back(Deserialize(inner.substr(start)));
+        }
+        return Object::Tuple(std::move(elements));
+    } else if (kind_str == "list") {
+        size_t bracket_pos = data.find('[');
+        size_t bracket_end = data.find(']', bracket_pos);
+        size_t type_colon = data.find(':', bracket_end);
+        if (bracket_pos == std::string::npos || bracket_end == std::string::npos || type_colon == std::string::npos) {
+            throw std::invalid_argument("Invalid list serialization");
+        }
+        std::string inner = data.substr(bracket_pos + 1, bracket_end - bracket_pos - 1);
+        std::string type_str = data.substr(type_colon + 1);
+        Type element_type = Type::Deserialize(type_str);
+        Objects elements;
+        if (!inner.empty()) {
+            size_t depth = 0;
+            size_t start = 0;
+            for (size_t i = 0; i < inner.size(); ++i) {
+                if (inner[i] == '(' || inner[i] == '[') ++depth;
+                if (inner[i] == ')' || inner[i] == ']') --depth;
+                if (depth == 0 && inner[i] == ',') {
+                    elements.push_back(Deserialize(inner.substr(start, i - start)));
+                    start = i + 1;
+                }
+            }
+            if (start < inner.size()) {
+                elements.push_back(Deserialize(inner.substr(start)));
+            }
+        }
+        return Object::List(std::move(elements), element_type);
+    } else if (kind_str == "adt") {
+        // Format: adt:type:constructor:(fields)
+        size_t first_colon = colon_pos;
+        size_t second_colon = serialized.find(':', first_colon + 1);
+        size_t third_colon = serialized.find(':', second_colon + 1);
+        if (second_colon == std::string::npos || third_colon == std::string::npos) {
+            throw std::invalid_argument("Invalid algebraic object serialization");
+        }
+        std::string type_str = serialized.substr(first_colon + 1, second_colon - first_colon - 1);
+        std::string constructor = serialized.substr(second_colon + 1, third_colon - second_colon - 1);
+        std::string fields_str = serialized.substr(third_colon + 1);
+        if (fields_str.size() < 2 || fields_str.front() != '(' || fields_str.back() != ')') {
+            throw std::invalid_argument("Invalid algebraic object fields serialization");
+        }
+        std::string inner = fields_str.substr(1, fields_str.size() - 2);
+        Objects fields;
+        if (!inner.empty()) {
+            size_t depth = 0;
+            size_t start = 0;
+            for (size_t i = 0; i < inner.size(); ++i) {
+                if (inner[i] == '(' || inner[i] == '[') ++depth;
+                if (inner[i] == ')' || inner[i] == ']') --depth;
+                if (depth == 0 && inner[i] == ',') {
+                    fields.push_back(Deserialize(inner.substr(start, i - start)));
+                    start = i + 1;
+                }
+            }
+            if (start < inner.size()) {
+                fields.push_back(Deserialize(inner.substr(start)));
+            }
+        }
+        return Object::Algebraic(Type::Deserialize(type_str), constructor, std::move(fields));
+    } else if (kind_str == "channel") {
+        throw std::logic_error("Channel objects cannot be deserialized (they are runtime-only)");
+    }
+
+    throw std::invalid_argument("Unknown object kind: " + kind_str);
+}
+
+size_t Object::Hash() const noexcept {
+    size_t h = std::hash<int>{}(static_cast<int>(kind()));
+    switch (kind()) {
+        case ObjectKind::Unit:
+            return h;
+        case ObjectKind::Int:
+            return HashCombine(h, std::hash<std::int64_t>{}(As<IntObject>()->value()));
+        case ObjectKind::Bool:
+            return HashCombine(h, std::hash<bool>{}(As<BoolObject>()->value()));
+        case ObjectKind::String:
+            return HashCombine(h, std::hash<std::string>{}(As<StringObject>()->value()));
+        case ObjectKind::Tuple: {
+            for (const auto& element : As<TupleObject>()->elements()) {
+                h = HashCombine(h, element.Hash());
+            }
+            return h;
+        }
+        case ObjectKind::List: {
+            auto list_obj = As<ListObject>();
+            h = HashCombine(h, list_obj->element_type().Hash());
+            for (const auto& element : list_obj->elements()) {
+                h = HashCombine(h, element.Hash());
+            }
+            return h;
+        }
+        case ObjectKind::Algebraic: {
+            auto alg_obj = As<AlgebraicObject>();
+            h = HashCombine(h, alg_obj->algebraic_type().Hash());
+            h = HashCombine(h, std::hash<std::string>{}(alg_obj->constructor_name()));
+            for (const auto& field : alg_obj->fields()) {
+                h = HashCombine(h, field.Hash());
+            }
+            return h;
+        }
+        case ObjectKind::Channel: {
+            auto channel_obj = As<ChannelObject>();
+            auto id = channel_obj->channel()->GetID();
+            if (id.has_value()) {
+                return HashCombine(h, std::hash<uint64_t>{}(*id));
+            }
+            return HashCombine(h, reinterpret_cast<size_t>(channel_obj->channel().get()));
+        }
+    }
+    return h;
+}
+
+bool operator==(const Object& lhs, const Object& rhs) noexcept {
+    if (lhs.kind() != rhs.kind()) {
+        return false;
+    }
+    switch (lhs.kind()) {
+        case ObjectKind::Unit:
+            return true;
+        case ObjectKind::Int:
+            return lhs.As<IntObject>()->value() == rhs.As<IntObject>()->value();
+        case ObjectKind::Bool:
+            return lhs.As<BoolObject>()->value() == rhs.As<BoolObject>()->value();
+        case ObjectKind::String:
+            return lhs.As<StringObject>()->value() == rhs.As<StringObject>()->value();
+        case ObjectKind::Tuple: {
+            const auto& lhs_elems = lhs.As<TupleObject>()->elements();
+            const auto& rhs_elems = rhs.As<TupleObject>()->elements();
+            if (lhs_elems.size() != rhs_elems.size()) {
+                return false;
+            }
+            for (size_t i = 0; i < lhs_elems.size(); ++i) {
+                if (lhs_elems[i] != rhs_elems[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        case ObjectKind::List: {
+            const auto& lhs_elems = lhs.As<ListObject>()->elements();
+            const auto& rhs_elems = rhs.As<ListObject>()->elements();
+            if (lhs_elems.size() != rhs_elems.size()) {
+                return false;
+            }
+            for (size_t i = 0; i < lhs_elems.size(); ++i) {
+                if (lhs_elems[i] != rhs_elems[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        case ObjectKind::Algebraic: {
+            auto lhs_alg = lhs.As<AlgebraicObject>();
+            auto rhs_alg = rhs.As<AlgebraicObject>();
+            if (lhs_alg->algebraic_type() != rhs_alg->algebraic_type()) {
+                return false;
+            }
+            if (lhs_alg->constructor_name() != rhs_alg->constructor_name()) {
+                return false;
+            }
+            const auto& lhs_fields = lhs_alg->fields();
+            const auto& rhs_fields = rhs_alg->fields();
+            if (lhs_fields.size() != rhs_fields.size()) {
+                return false;
+            }
+            for (size_t i = 0; i < lhs_fields.size(); ++i) {
+                if (lhs_fields[i] != rhs_fields[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        case ObjectKind::Channel: {
+            auto lhs_ch = lhs.As<ChannelObject>();
+            auto rhs_ch = rhs.As<ChannelObject>();
+            return lhs_ch->channel() == rhs_ch->channel();
+        }
+    }
+    return false;
+}
+
+bool operator!=(const Object& lhs, const Object& rhs) noexcept {
+    return !(lhs == rhs);
 }
 
 bool IsInstanceOf(const Object& object, const Type& type) noexcept {
@@ -653,6 +1188,27 @@ std::string ToString(ObjectKind kind) {
             return "channel";
     }
     return "unknown-object-kind";
+}
+
+// Stream operators
+std::ostream& operator<<(std::ostream& os, const Type& type) {
+    return os << type.ToString();
+}
+
+std::ostream& operator<<(std::ostream& os, const Object& object) {
+    return os << object.ToString();
+}
+
+std::ostream& operator<<(std::ostream& os, ChannelMode mode) {
+    return os << ToString(mode);
+}
+
+std::ostream& operator<<(std::ostream& os, TypeKind kind) {
+    return os << ToString(kind);
+}
+
+std::ostream& operator<<(std::ostream& os, ObjectKind kind) {
+    return os << ToString(kind);
 }
 
 }
