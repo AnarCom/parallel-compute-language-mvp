@@ -10,3 +10,4 @@ Makefile
 Testing
 *.cmake
 *.a
+package/
