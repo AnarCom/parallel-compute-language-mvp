@@ -1,0 +1,50 @@
+func Sort(array []int, reply async []int) {
+    type SortTask struct {
+        array []int
+        reply async []int
+    }
+
+    var SortTasksCh async SortTask // Канал для задач для сортировк
+    
+    join {
+        case from SortTasksCh as task:
+            arr := task.array
+            reply := task.reply
+
+            if len(arr) <= 1 {
+                reply <- arr
+                return
+            }
+
+            left, pivot, right := partition(arr) // Стандартный partition массива, оставим в качестве упражнения)
+
+            // Два канала-ответа для половин
+            var replyLeft async []int
+            var replyRight async []int
+
+            // Локальный join: ждём оба результата и отвечаем
+            join {
+                case from replyLeft as leftSorted, from replyRight as rightSorted:
+                    reply <- concat(leftSorted, []int{pivot}, rightSorted) // Допустим функция concat тоже есть
+            }
+
+            // Запускаем сортировку половин
+            SortTasksCh <- {left,  replyLeft}
+            SortTasksCh <- {right, replyRight}
+    }
+
+    // Запускаем первую задачу
+    SortTasksCh <- {array, reply}
+
+    // NOTE: В этой реализации много лишних копирований, но несложно переписать с использованием одного выходного массива, используя индексы
+    //       Но сейчас особо без разницы, так как пока не проработали концепцию read-only ссылок
+}
+
+array := []int{5, 2, 8, 4, 1, 3, 7, 6} // Допустим, как-то получили массив
+
+var reply async []int
+Sort(array, reply)
+join {
+    case from reply as sorted:
+        print(sorted)
+}
