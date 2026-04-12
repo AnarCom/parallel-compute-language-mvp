@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include "cycle_impl.hpp"
+#include <repository.hpp>
 #include "type_system.hpp"
 
 TEST(TypeSystem, PrimitiveAndCompositeRuntimeChecks) {

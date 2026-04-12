@@ -6,6 +6,16 @@
 
 namespace reactor {
 
+template <typename T>
+using Pointer = std::shared_ptr<T>;
+
+template <typename T>
+using Maybe = std::optional<T>;
+
+class ChannelBase;
+
+using ChannelPtr = Pointer<ChannelBase>;
+
 class ChannelBase : public ObjectValue {
 public:
     ChannelBase(ChannelMode mode, Type payload_type);

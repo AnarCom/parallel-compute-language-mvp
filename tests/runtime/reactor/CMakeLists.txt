@@ -12,5 +12,5 @@ add_test(NAME TestReactor COMMAND TestReactorRunner)
 
 # Add manual test executable (no gtest dependency)
 add_executable(ManualTestTypeSystem manual_test_type_system.cpp)
-target_link_libraries(ManualTestTypeSystem PRIVATE LibReactor)
+target_link_libraries(ManualTestTypeSystem PRIVATE ParallelReactor ReactorCommon)
 add_test(NAME ManualTypeSystemTest COMMAND ManualTestTypeSystem)

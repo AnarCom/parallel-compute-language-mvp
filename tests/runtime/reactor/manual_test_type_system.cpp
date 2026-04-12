@@ -1,6 +1,5 @@
-#include "../src/type_system.hpp"
-#include "../src/interface.hpp"
-#include "../src/cycle_impl.hpp"
+#include <repository.hpp>
+#include "type_system.hpp"
 #include <iostream>
 #include <sstream>
 #include <cassert>

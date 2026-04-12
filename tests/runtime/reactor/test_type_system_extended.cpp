@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
 
-#include "cycle_impl.hpp"
+#include <repository.hpp>
 #include "type_system.hpp"
 #include <unordered_map>
 #include <unordered_set>
@@ -280,9 +280,9 @@ TEST(TypeSystemExtended, ConvenienceAccessors) {
     EXPECT_EQ(list_obj.AsList()[1].AsInt(), 2);
 
     // Test error cases
-    EXPECT_THROW(bool_obj.AsInt(), std::logic_error);
-    EXPECT_THROW(int_obj.AsBool(), std::logic_error);
-    EXPECT_THROW(string_obj.AsTuple(), std::logic_error);
+    EXPECT_THROW((void)bool_obj.AsInt(), std::logic_error);
+    EXPECT_THROW((void)int_obj.AsBool(), std::logic_error);
+    EXPECT_THROW((void)string_obj.AsTuple(), std::logic_error);
 }
 
 TEST(TypeSystemExtended, ChannelObjectIntegration) {
