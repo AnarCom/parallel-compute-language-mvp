@@ -1,7 +1,7 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include <repository.hpp>
-#include "type_system.hpp"
+#include <runtime/reactor/parallel/repository.hpp>
+#include <runtime/reactor/common/type_system.hpp>
 
 TEST(TypeSystem, PrimitiveAndCompositeRuntimeChecks) {
     using namespace reactor;

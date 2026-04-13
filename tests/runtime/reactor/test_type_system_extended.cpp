@@ -1,9 +1,10 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
-#include <repository.hpp>
-#include "type_system.hpp"
 #include <unordered_map>
 #include <unordered_set>
+
+#include <runtime/reactor/parallel/repository.hpp>
+#include <runtime/reactor/common/type_system.hpp>
 
 TEST(TypeSystemExtended, TypeSerialization) {
     using namespace reactor;
@@ -301,9 +302,6 @@ TEST(TypeSystemExtended, ChannelObjectIntegration) {
     // Test AsChannel accessor
     auto retrieved_channel = channel_obj.AsChannel();
     EXPECT_EQ(retrieved_channel, int_channel);
-    
-    // Test that channel has an ID
-    EXPECT_TRUE(retrieved_channel->GetID().has_value());
 }
 
 TEST(TypeSystemExtended, StreamOperators) {

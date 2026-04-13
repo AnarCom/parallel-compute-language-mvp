@@ -28,18 +28,11 @@ Type ChannelBase::GetType() const {
 }
 
 std::string ChannelBase::ToString() const {
-    if (auto id = GetID(); id.has_value()) {
-        return "<channel #" + std::to_string(*id) + ": " + GetType().ToString() + ">";
-    }
-    return "<channel: " + GetType().ToString() + ">";
+    return "<channel #" + std::to_string(GetID()) + ": " + GetType().ToString() + ">";
 }
 
 std::string ChannelBase::Serialize() const {
-    auto id = GetID();
-    if (id.has_value()) {
-        return "channel:" + std::to_string(*id) + ":" + GetType().Serialize();
-    }
-    return "channel:unregistered:" + GetType().Serialize();
+    return "channel:" + std::to_string(GetID()) + ":" + GetType().Serialize();
 }
 
 // ChannelObject implementation
