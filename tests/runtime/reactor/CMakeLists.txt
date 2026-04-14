@@ -1,14 +1,17 @@
 # Find the installed GoogleTest package
 find_package(GTest REQUIRED)
 
-# Add a test executable
-add_executable(TestReactorRunner test_cycle.cpp test_types.cpp test_type_system_extended.cpp)
+add_executable(TestTypeSystemRunner test_types.cpp test_type_system_extended.cpp)
+target_link_libraries(TestTypeSystemRunner PRIVATE GTest::GTest GTest::Main ParallelReactor)
+add_test(NAME TestTypeSystem COMMAND TestTypeSystemRunner)
 
-# Link the test executable with GTest libraries and your own library
-target_link_libraries(TestReactorRunner PRIVATE GTest::GTest GTest::Main ParallelReactor)
+add_executable(TestParallelRunner test_cycle.cpp)
+target_link_libraries(TestParallelRunner PRIVATE GTest::GTest GTest::Main ParallelReactor)
+add_test(NAME TestParallel COMMAND TestParallelRunner)
 
-# Add the test to CTest for automatic discovery and running
-add_test(NAME TestReactor COMMAND TestReactorRunner)
+add_executable(TestDistributedRunner test_distributed_config.cpp)
+target_link_libraries(TestDistributedRunner PRIVATE GTest::GTest GTest::Main DistributedReactor)
+add_test(NAME TestDistributed COMMAND TestDistributedRunner)
 
 # Add manual test executable (no gtest dependency)
 add_executable(ManualTestTypeSystem manual_test_type_system.cpp)
