@@ -9,9 +9,13 @@ add_executable(TestParallelRunner test_cycle.cpp)
 target_link_libraries(TestParallelRunner PRIVATE GTest::GTest GTest::Main ParallelReactor)
 add_test(NAME TestParallel COMMAND TestParallelRunner)
 
-add_executable(TestDistributedRunner test_distributed_config.cpp)
-target_link_libraries(TestDistributedRunner PRIVATE GTest::GTest GTest::Main DistributedReactor)
-add_test(NAME TestDistributed COMMAND TestDistributedRunner)
+add_executable(TestDistributedConfigRunner test_distributed_config.cpp)
+target_link_libraries(TestDistributedConfigRunner PRIVATE GTest::GTest GTest::Main DistributedReactor)
+add_test(NAME TestDistributedConfig COMMAND TestDistributedConfigRunner)
+
+add_executable(TestDistributedRedisClientRunner test_distributed_redis_client.cpp)
+target_link_libraries(TestDistributedRedisClientRunner PRIVATE GTest::GTest GTest::Main DistributedReactor)
+add_test(NAME TestDistributedRedisClient COMMAND TestDistributedRedisClientRunner)
 
 # Add manual test executable (no gtest dependency)
 add_executable(ManualTestTypeSystem manual_test_type_system.cpp)
