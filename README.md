@@ -9,6 +9,8 @@ Build GoJo package creates package directory with built dependencies parser, run
 Using GoJo:
 * Set environment variable `GOJO_PATH` to package directory
 * (optionally )Add `GOJO_PATH/gojo` to `PATH`
-* C++ compiler with C++20 support should be installed in system with GoJo compiler. Now `clang++` and `g++` are supported.
+* C++ compiler with C++23 support should be installed in system with GoJo compiler. Now `clang++` and `g++` are supported.
 * `gojo <input file> <output file>`, e.g. `gojo atomic_counter.gojo atomic_counter` cretes executable `atomic_counter`
 * While working script creates and then remove temporary cpp file `tmp/<output_file>.cpp`. To not clear it use `--tmp` as the last argument
+
+Before running tests start redis with `$ docker run --name some-redis --network host --rm -d redis` command
