@@ -49,7 +49,7 @@ awaitable<void> RedisClient::PushToChannel(const std::string& channel_id, const 
     auto new_tail = GenNode(channel_id);
 
     request req;
-    req.push("EVAL", scripts::kSendScript, "3", expected_tail, new_tail, channel_id, SerializeObject(object));
+    req.push("EVAL", scripts::kPushScript, "3", expected_tail, new_tail, channel_id, SerializeObject(object));
 
     response<bool> resp;
     co_await conn_ptr_->async_exec(req, resp);
@@ -180,7 +180,7 @@ awaitable<KeyToAttrsMap> RedisClient::GetAttributes(const Keys& keys, const Attr
     {
         // TODO: reserve correct size
         std::vector<std::string_view> command;
-        command.push_back(scripts::kGetTailsScript);
+        command.push_back(scripts::kGetAttributesScript);
         auto key_count_as_string = std::to_string(keys.size());
         command.push_back(key_count_as_string);
         for (const auto& key : keys) {
