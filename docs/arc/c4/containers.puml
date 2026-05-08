@@ -1,0 +1,25 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+title C4-2 Containers - GoJo Runtime
+
+Person(dev, "Developer")
+
+System_Boundary(toolchain_system, "GoJo Language Toolchain") {
+    Container(toolchain, "Language Toolchain", "CLI", "Parser -> C++ codegen -> native build linked with runtime library")
+}
+System_Boundary(runtime_system, "GoJo Runtime System") {
+  Container(worker, "Join Worker", "Native binary (C++ + runtime)", "Executes reactions")
+}
+
+System_Ext(kafka, "Kafka Cluster", "Tokens storage/queue")
+System_Ext(k8s, "Kubernetes", "Containers orchestrator")
+System_Ext(ci, "CI/CD", "Build images; deploy to k8s")
+System_Ext(ext, "External Systems", "HTTP APIs, databases, other services")
+
+Rel(dev, toolchain, "Builds binaries/images with")
+Rel(toolchain, ci, "Integrates into")
+Rel(ci, k8s, "Deploys workers")
+Rel(k8s, worker, "Runs N replicas of")
+Rel(worker, kafka, "Polls/produces tokens (EOS transactions)", "Kafka protocol")
+Rel(worker, ext, "Calls for side effects", "HTTP, gRPC, SQL, etc.")
+@enduml
