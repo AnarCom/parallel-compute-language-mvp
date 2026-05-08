@@ -1,16 +1,12 @@
 #pragma once
 
 #include <functional>
+#include <unordered_map>
 
+#include "helpers.hpp"
 #include "type_system.hpp"
 
 namespace reactor {
-
-template <typename T>
-using Pointer = std::shared_ptr<T>;
-
-template <typename T>
-using Maybe = std::optional<T>;
 
 class ChannelBase;
 
@@ -22,7 +18,7 @@ public:
     virtual ~ChannelBase() noexcept;
 
     virtual void Push(const Object& message) = 0;
-    virtual Maybe<uint64_t> GetID() const noexcept = 0;
+    virtual uint64_t GetID() const noexcept = 0;
 
     [[nodiscard]] ChannelMode mode() const noexcept;
     [[nodiscard]] const Type& payload_type() const noexcept;
@@ -44,19 +40,18 @@ class Runnable {
 public:
     virtual ~Runnable() noexcept;
 
-    virtual void operator()(Objects inputs) = 0;
+    virtual void operator()(Objects inputs, Objects context) = 0;
+    virtual uint64_t GetID() const noexcept = 0;
 };
-
-using RunnableOrLambda = std::function<void(Objects)>;
 
 class Repository {
 public:
     virtual ~Repository() noexcept;
 
-    virtual void RegisterJoinCase(Channels inputs, Channels outputs, Pointer<RunnableOrLambda> reaction) = 0;
+    virtual void RegisterJoinCase(Channels inputs, Objects context, uint64_t runnable_id) = 0;
     virtual Pointer<ChannelBase> NewChannel(ChannelMode mode = ChannelMode::Async, Type payload_type = Type::Unit()) = 0;
 
-    virtual void Run(Pointer<RunnableOrLambda> reaction) = 0;
+    virtual void Run(uint64_t main_runnable_id, std::unordered_map<uint64_t, Runnable*> runnable_map) = 0;
 };
 
 }  // namespace reactor

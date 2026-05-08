@@ -1002,9 +1002,7 @@ size_t Object::Hash() const noexcept {
         case ObjectKind::Channel: {
             auto channel_obj = As<ChannelObject>();
             auto id = channel_obj->channel()->GetID();
-            if (id.has_value()) {
-                return HashCombine(h, std::hash<uint64_t>{}(*id));
-            }
+            return HashCombine(h, std::hash<uint64_t>{}(id));
             return HashCombine(h, reinterpret_cast<size_t>(channel_obj->channel().get()));
         }
     }
