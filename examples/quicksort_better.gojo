@@ -1,0 +1,47 @@
+// Пример реализации quicksort на языке gojo. Чуть более оптимальная версия
+// изменения по синтаксису:
+// join {} перестаёт существовать
+// case можно писать просто в коде
+// после case или then case можно писать then или then case:
+//   then выполняется после удаления case из runtime библиотеки и выполняет произвольный код
+//   then case это просто сокращенная версия then, в теле которого добавляется новый case
+// добавляются специализированные версии case:
+//   once - case выполняется всего один раз
+//   take N - case выполняется до N раз. Получается лист объектов, полученных из канала. (Пусть пока поддерживается только для одного канала)
+
+func sort(Input reader, Depth int) (async int) {
+    // Даёт пользователю околооптимальное значение максимальной глубины при ветвлении в зависимости от кол-ва нод и ядер
+    if (Depth > MaxDepthLog(2)) {
+        // Сортирует локально
+        return SortLocal(Input)
+    }
+
+    var Result async int
+    var Bellow async int
+    var Above async int
+
+    once from Input as Pivot {
+        case from Input as Next {
+            if (Next < Pivot) {
+                Bellow <- Next
+            } else {
+                Above <- Next
+            }
+        }
+    } then {
+        BellowResult := sort(Bellow, Depth + 1)
+        AboveResult := sort(Above, Depth + 2)
+        case BellowResult as NextResult {
+            Result <- NextResult
+        } then case AboveResult as NextResult {
+            Result <- NextResult
+        }
+    }
+    return Result
+}
+
+// Main функция может получать на вход каналы для ввода и вывода. Или может это скрыть в библиотеку, доступную пользователю из любой точки кода
+func Main(Stdin async int, Stdout async int) {
+    // Переложить сообщения из одного канала в другой, хз насколько нужная вещь в реальности и пока не понятно как такое реализовать
+    Stdout <<- sort(Stdin, 0)
+}
