@@ -5,7 +5,7 @@
 #include <mutex>
 #include <semaphore>
 
-#include "interface.hpp"
+#include <interface.hpp>
 
 namespace reactor {
 
