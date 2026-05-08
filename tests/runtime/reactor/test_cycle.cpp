@@ -1,10 +1,10 @@
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 #include <atomic>
 
-#include "logging.hpp"
-#include "cycle_impl.hpp"
-#include "interface.hpp"
+#include <interface.hpp>
+#include <logging.hpp>
+#include <repository.hpp>
 
 constexpr auto TestRepo = &reactor::CycleRepository::GetRepository;
 
