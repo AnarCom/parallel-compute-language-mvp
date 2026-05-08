@@ -8,7 +8,8 @@
 #include <queue>
 #include <semaphore>
 
-#include <interface.hpp>
+#include <runtime/reactor/common/helpers.hpp>
+#include <runtime/reactor/common/interface.hpp>
 
 namespace reactor {
 
@@ -31,13 +32,14 @@ class CycleRepository;
 
 struct JoinCase {
     IDs input_ids;
-    Channels outputs;
-    Pointer<RunnableOrLambda> reaction;
+    Objects context;
+    uint64_t runnable_id;
 };
 
 struct SchedulledCall {
     Objects inputs;
-    Pointer<RunnableOrLambda> callee;
+    Objects context;
+    Runnable* runnable;
 };
 
 class Callback {
@@ -52,18 +54,16 @@ private:
 
 class CycleChannel : public ChannelBase {
 public:
-    CycleChannel(ChannelMode mode, Type payload_type) noexcept;
+    CycleChannel(ChannelMode mode, Type payload_type, uint64_t id, Pointer<Callback> callback) noexcept;
 
     void Push(const Object& message) override;
-    Maybe<uint64_t> GetID() const noexcept override;
+    uint64_t GetID() const noexcept override;
 
 private:
-    void SetID(uint64_t id) noexcept;
-    void SetCallback(Pointer<Callback> callback) noexcept;
     Pointer<Callback> GetCallback() const noexcept;
 
-    Maybe<uint64_t> id;
-    Pointer<Callback> callback;
+    uint64_t id_;
+    Pointer<Callback> callback_;
 
     friend CycleRepository;
 };
@@ -72,15 +72,12 @@ class CycleRepository : public Repository {
 public:
     CycleRepository();   
     static CycleRepository& GetRepository();
-    void RegisterJoinCase(Channels inputs, Channels outputs, Pointer<RunnableOrLambda> reaction) override;
+    void RegisterJoinCase(Channels inputs, Objects context, uint64_t runnable_id) override;
     Pointer<ChannelBase> NewChannel(ChannelMode mode = ChannelMode::Async, Type payload_type = Type::Unit()) override;
-    void Run(Pointer<RunnableOrLambda> reaction) override;
+    void Run(uint64_t main_runnable_id, std::unordered_map<uint64_t, Runnable*> runnable_map) override;
 
 private:
     using QueuesMap = std::map<uint64_t, QueuePointer>;
-
-    // methods
-    //CycleRepository();
 
     void RunRoutine() noexcept;
     bool CheckCases() noexcept;
@@ -100,6 +97,7 @@ private:
     std::atomic<std::ptrdiff_t> active_threads;
     std::recursive_mutex lock;
     std::counting_semaphore<max_schedulled_calls> calls_semaphore;
+    std::unordered_map<uint64_t, Runnable*> runnable_map_;
 };
 
 }  // namespace reactor

@@ -1,9 +1,10 @@
-#include <repository.hpp>
-#include "type_system.hpp"
 #include <iostream>
 #include <sstream>
 #include <cassert>
 #include <unordered_map>
+
+#include <runtime/reactor/parallel/repository.hpp>
+#include <runtime/reactor/common/type_system.hpp>
 
 using namespace reactor;
 

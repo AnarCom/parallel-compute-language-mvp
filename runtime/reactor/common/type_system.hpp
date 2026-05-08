@@ -11,13 +11,9 @@
 #include <vector>
 #include <iosfwd>
 
+#include "helpers.hpp"
+
 namespace reactor {
-
-template <typename T>
-using Pointer = std::shared_ptr<T>;
-
-template <typename T>
-using Maybe = std::optional<T>;
 
 class Object;
 class ObjectValue;
