@@ -1,0 +1,30 @@
+func makeAtomicCounter(init int) (sync () int, async async int, async int) {
+    var SyncGet sync () int
+    var AsyncGet async async int
+    var Inc async int
+    var Val async int
+    join {
+        case from Inc, from Val as val:
+            Val <- val + 1
+        case from SyncGet, from Val as val:
+            SyncGet <! val
+            Val <- val
+        case from AsyncGet as ReplyCh, from Val as val:
+            // Можно ли здесь объявить Join с участием ReplyCh?
+            ReplyCh <- val
+            Val <- val
+    }
+    Val <- init
+    return SyncGet, AsyncGet, Inc
+}
+
+SyncGet, AsyncGet, Inc := makeAtomicCounter(0)
+Inc <- 1
+print(SyncGet <- 1)
+Inc <- 1
+var Result async int
+join {
+    case from Result as res:
+        print(res)
+}
+AsyncGet <- Result

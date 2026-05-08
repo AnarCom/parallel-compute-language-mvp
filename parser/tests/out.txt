@@ -1,0 +1,170 @@
+(
+sourceFile (
+    functionDecl func makeAtomicCounter (
+        signature (
+            parameters (
+                (
+                    parameterDecl (
+                        identifierList init
+                    )
+                    (
+                        type_ (
+                            typeName int
+                        )
+                    )
+                )
+            )
+        ) 
+        (
+            result(
+                parameters (
+                    (
+                        parameterDecl (
+                            type_ (
+                                typeLit (
+                                    syncChannelType sync (
+                                        signature (
+                                            parameters ( )
+                                        )
+                                        (
+                                            result (
+                                                type_ (
+                                                    typeName int
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    (
+                        parameterDecl (
+                            type_ (
+                                typeLit (
+                                    asyncChannelType async (
+                                        elementType (
+                                            type_ (
+                                                typeLit (
+                                                    asyncChannelType async (
+                                                        elementType (
+                                                            type_ (
+                                                                typeName int
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    ) ,
+                    (
+                        parameterDecl (
+                            type_ (
+                                typeLit (
+                                    asyncChannelType async (
+                                        elementType (
+                                            type_ (
+                                                typeName int
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+    (
+        block {
+            (
+                statementList (
+                    statement (
+                        declaration (
+                            varDecl var (
+                                varSpec (
+                                    identifierList SyncGet
+                                )
+                                (
+                                    type_ (
+                                        typeLit (
+                                            syncChannelType sync (
+                                                signature (
+                                                    parameters ( )
+                                                )
+                                            (
+                                                result (
+                                                    type_ (
+                                                        typeName int
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+            (eos \n) 
+            (statement (declaration (varDecl var (varSpec (identifierList AsyncGet) (type_ (typeLit (asyncChannelType async (elementType (type_ (typeLit (asyncChannelType async (elementType (type_ (typeName int)))))))))))))) (eos \n) (statement (declaration (varDecl var (varSpec (identifierList Inc) (type_ (typeLit (asyncChannelType async (elementType (type_ (typeName int)))))))))) (eos \n) (statement (declaration (varDecl var (varSpec (identifierList Val) (type_ (typeLit (asyncChannelType async (elementType (type_ (typeName int)))))))))) (eos \n)
+            (
+                statement (
+                    joinStmt join {(
+                        matchClause(
+                            matchCase case (
+                                fromChanAs from Inc
+                            ) ,
+                            (
+                                fromChanAs from Val as val
+                            )
+                        ):
+                        (
+                            statementList (
+                                statement (
+                                    simpleStmt (
+                                        emitStmt (
+                                            expression (
+                                                primaryExpr (
+                                                    operand (
+                                                        operandName Val
+                                                    )
+                                                )
+                                            )
+                                        ) <-
+                                        (
+                                            expression (
+                                                expression (
+                                                    primaryExpr (
+                                                        operand (
+                                                            operandName val
+                                                        )
+                                                    )
+                                                )
+                                            ) + 
+                                            (
+                                                expression (
+                                                    primaryExpr (
+                                                        operand (
+                                                            literal (
+                                                                basicLit (
+                                                                    integer 1
+                                                                )
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                            (eos \n)
+                        )
+                    ) (matchClause (matchCase case (fromChanAs from SyncGet) , (fromChanAs from Val as val)) : (statementList (statement (simpleStmt (expressionStmt (expression (expression (primaryExpr (operand (operandName SyncGet)))) < (expression ! (expression (primaryExpr (operand (operandName val))))))))) (eos \n) (statement (simpleStmt (emitStmt (expression (primaryExpr (operand (operandName Val)))) <- (expression (primaryExpr (operand (operandName val))))))) (eos \n))) (matchClause (matchCase case (fromChanAs from AsyncGet as ReplyCh) , (fromChanAs from Val as val)) : (statementList (statement (simpleStmt (emitStmt (expression (primaryExpr (operand (operandName ReplyCh)))) <- (expression (primaryExpr (operand (operandName val))))))) (eos \n) (statement (simpleStmt (emitStmt (expression (primaryExpr (operand (operandName Val)))) <- (expression (primaryExpr (operand (operandName val))))))) (eos \n))) })) (eos \n) (statement (simpleStmt (emitStmt (expression (primaryExpr (operand (operandName Val)))) <- (expression (primaryExpr (operand (operandName init))))))) (eos \n) (statement (returnStmt return (expressionList (expression (primaryExpr (operand (operandName SyncGet)))) , (expression (primaryExpr (operand (operandName AsyncGet)))) , (expression (primaryExpr (operand (operandName Inc))))))) (eos \n)) })) (eos \n\n) (statement (simpleStmt (shortVarDecl (identifierList SyncGet , AsyncGet , Inc) := (expressionList (expression (primaryExpr (operand (operandName makeAtomicCounter)) (arguments ( (expressionList (expression (primaryExpr (operand (literal (basicLit (integer 0))))))) )))))))) (eos \n) (statement (simpleStmt (emitStmt (expression (primaryExpr (operand (operandName Inc)))) <- (expression (primaryExpr (operand (literal (basicLit (integer 1))))))))) (eos \n) (statement (simpleStmt print ( SyncGet <- 1 ))) (eos \n) (statement (simpleStmt (emitStmt (expression (primaryExpr (operand (operandName Inc)))) <- (expression (primaryExpr (operand (literal (basicLit (integer 1))))))))) (eos \n) (declaration (varDecl var (varSpec (identifierList Result) (type_ (typeLit (asyncChannelType async (elementType (type_ (typeName int))))))))) (eos \n) (statement (joinStmt join { (matchClause (matchCase case (fromChanAs from Result as res)) : (statementList (statement (simpleStmt (expressionStmt (expression (primaryExpr (operand (operandName print)) (arguments ( (expressionList (expression (primaryExpr (operand (operandName res))))) ))))))) (eos \n))) })) (eos \n) (statement (simpleStmt (emitStmt (expression (primaryExpr (operand (operandName AsyncGet)))) <- (expression (primaryExpr (operand (operandName Result))))))) (eos \n) <EOF>)

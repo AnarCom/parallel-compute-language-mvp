@@ -1,0 +1,6 @@
+.antlr
+.vscode
+build/
+.DS_Store
+.ccahe/
+.cache/
