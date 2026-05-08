@@ -6,6 +6,7 @@ build/
 .cache/
 CMakeFiles
 CMakeCache.txt
+Makefile
 Testing
 *.cmake
 *.a
