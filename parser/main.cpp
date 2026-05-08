@@ -1,5 +1,8 @@
 #include "antlr4-runtime.h"
 
+#include "generated/TParserVisitor.h"
+#include "visitor/visitor.h"
+
 #include "generated/TLexer.h"
 #include "generated/TParser.h"
 
@@ -24,16 +27,22 @@ int main(int argc, const char** argv) {
   ANTLRInputStream input(sourceFileData);
   TLexer lexer(&input);
   CommonTokenStream tokens(&lexer);
-
   tokens.fill();
-  for (auto token : tokens.getTokens()) {
-    std::cout << token->toString() << std::endl;
-  }
 
   TParser parser(&tokens);
   tree::ParseTree* tree = parser.sourceFile();
 
-  std::cout << tree->toStringTree(&parser) << std::endl << std::endl;
+  std::string outFilePath(argv[2]);
+
+  Visitor visitor(outFilePath);
+  visitor.WriteHeaders();
+  visitor.WriteGlobals();
+  visitor.WritePredefinedFunctions();
+  visitor.WriteFunctions(tree);
+  visitor.StartEntryFunc();
+  visitor.visit(tree);
+  visitor.EndEntryFunc();
+  visitor.WriteMain();
 
   return 0;
 }

@@ -16,11 +16,24 @@ using Maybe = std::optional<T>;
 
 class ChannelBase;
 
+using ChannelPtr = Pointer<ChannelBase>;
+
 class Object {
 public:
     virtual ~Object() noexcept;
-    int integer = 0;
-    Pointer<ChannelBase> channel = {};
+
+    Object() = default;
+
+    template <typename T>
+    Object(T value) : value(value) {}
+
+    template <typename T>
+    T Get() const {
+        return std::get<T>(value);
+    }
+
+    std::variant<int, ChannelPtr> value;
+
 };
 
 using Objects = std::vector<Object>;
@@ -33,7 +46,7 @@ public:
     virtual Maybe<uint64_t> GetID() const noexcept = 0;
 };
 
-using Channels = std::vector<Pointer<ChannelBase>>;
+using Channels = std::vector<ChannelPtr>;
 
 class Runnable {
 public:
@@ -50,7 +63,7 @@ public:
 
     /* currently outputs is an empty vector. Will be provided later for runtime optimization purposes */
     virtual void RegisterJoinCase(Channels inputs, Channels outputs, Pointer<RunnableOrLambda> reaction) = 0;
-    virtual Pointer<ChannelBase> NewChannel() = 0;
+    virtual ChannelPtr NewChannel() = 0;
 
     virtual void Run(Pointer<RunnableOrLambda> reaction) = 0;
 };

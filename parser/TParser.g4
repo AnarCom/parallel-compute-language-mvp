@@ -342,7 +342,7 @@ matchCase
    ;
 
 fromChanAs
-   : FROM IDENTIFIER (AS IDENTIFIER)?
+   : FROM chanName = IDENTIFIER (AS varName = IDENTIFIER)?
    ;
 
 forStmt
@@ -462,6 +462,7 @@ parameterDecl
 expression
     : primaryExpr
     | unary_op = (PLUS | MINUS | EXCLAMATION | CARET | STAR | AMPERSAND /*| RECEIVE*/) expression
+    | expression EMIT expression
     | expression mul_op = (STAR | DIV | MOD | LSHIFT | RSHIFT | AMPERSAND | BIT_CLEAR) expression
     | expression add_op = (PLUS | MINUS | OR | CARET) expression
     | expression rel_op = (
@@ -476,8 +477,8 @@ expression
     | expression LOGICAL_OR expression
     ;
 
-primaryExpr :
-    operand
+primaryExpr
+    : operand
     /*( {this->isOperand()}? operand
     | {this->isConversion()}? conversion
     | {this.isMethodExpr()}? methodExpr )*/
@@ -604,5 +605,6 @@ methodExpr
 eos
     : SEMI
     | EOS
+    | EOF
     //| {this->closingBracket()}?
     ;
