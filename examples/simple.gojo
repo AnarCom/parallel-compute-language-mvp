@@ -1,0 +1,19 @@
+var Square sync int
+var Sum sync (int, int)
+var Log async int
+
+join {
+    case from Square as num:
+        Square <! (num * num)
+    case from Log as msg:
+        Print(msg)
+    case from Sum as (n):
+        s := Square <- n
+        if n > 0 {
+            s += Sum <- (n - 1)
+        }
+        Sum <! s
+}
+
+Log <- (Square <- 3)
+Log <- (Sum <- 5)
