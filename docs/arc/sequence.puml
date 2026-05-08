@@ -1,0 +1,74 @@
+@startuml
+title Sequence - Microbatch on one partition (Model A, per-key join-only, Kafka transactions)
+
+participant "Partition Event Loop\n(single-thread)" as L
+participant "Kafka Consumer" as C
+participant "Tokens Codec" as D
+participant "In-Memory Join State" as S
+participant "Matcher" as M
+participant "Rules Registry" as R
+participant "Reactions Executor" as E
+participant "Kafka Txn Producer" as P
+database "Kafka Cluster\n(topic domain.tokens)" as K
+participant "External System\n(HTTP/DB)" as X
+
+== 1) Poll ==
+L -> C: poll(maxRecords, timeout)
+C -> K: Fetch records from assigned partition
+K --> C: records r1..rn
+C --> L: records r1..rn
+
+== 2) Enqueue + incremental match ==
+loop for each record ri
+  L -> D: decode(ri) -> Token{key, channel_id, event_id, payload}
+  D --> L: token ti
+  L -> S: enqueue(ti.channel_id, ti.key, ti)
+  L -> M: onTokenArrived(ti.channel_id, ti.key)
+
+  M -> R: rulesByChannel[channel_id] -> worklist
+  loop while worklist not empty
+    M -> S: enabled?(rule R, key=ti.key)  // all deps non-empty for this key
+    alt enabled
+      M -> S: pop_front one token from each dep queue (FIFO)
+      M -> E: scheduleFiring(ruleId, key, consumedTokens)
+    else not enabled
+      M -> M: continue
+    end
+  end
+end
+
+== 3) Execute scheduled firings ==
+loop for each scheduled firing f (deterministic order)
+  E -> E: reactionExecutionId = hash(ruleId, consumed event_ids)
+  opt optional side effects
+    E -> X: call(request, idempotencyKey=reactionExecutionId)
+    X --> E: response
+  end
+  E -> E: outTokens += emitted tokens (each has key + channel_id + new event_id)
+end
+
+== 4) Transactional produce outputs + commit offsets ==
+L -> P: beginTransaction()
+P -> K: Begin producer transaction (transactional.id)
+loop for each output token ot
+  L -> D: encode(ot) -> kafkaMessage(key=ot.key, headers{channel_id,event_id}, value=payload)
+  D --> L: msg
+  L -> P: send(msg)
+  P -> K: Produce message (part of txn)
+end
+L -> P: sendOffsetsToTransaction(offsets for r1..rn)
+P -> K: Add offsets to txn
+L -> P: commitTransaction()
+P -> K: Commit txn (outputs become visible + offsets committed atomically)
+K --> P: committed
+P --> L: ok
+
+note over L,K
+If worker crashes before commit:
+- transaction is aborted/never committed
+- offsets are not committed
+- records will be re-polled
+- aborted outputs are not visible to read_committed consumers
+end note
+
+@enduml

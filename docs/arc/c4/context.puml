@@ -1,0 +1,19 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+title C4-1 System Context - GoJo
+
+Person(dev, "Developer", "Writes services in GoJo; compiles and deploys to k8s")
+
+System(joinSystem, "GoJo Runtime System", "Executes join rules (reactions) on a worker cluster")
+System(languageToolchain, "GoJo Language Toolchain", "Builds executables from GoJo source")
+
+System_Ext(kafka, "Kafka Cluster", "Stores token log (domain.tokens); provides partitions, consumer groups, transactions")
+System_Ext(k8s, "Kubernetes", "Runs worker replicas; scaling, rolling updates, service discovery")
+System_Ext(ext, "External Systems", "HTTP APIs, databases, other services; idempotency is app responsibility")
+
+Rel(dev, languageToolchain, "Write code")
+Rel(dev, joinSystem, "Runs execution")
+Rel(joinSystem, kafka, "Consumes tokens; matches rules; produces tokens transactionally", "Kafka protocol")
+Rel(joinSystem, ext, "Calls for side effects (optional); passes reactionExecutionId as idempotency key", "HTTP, gRPC, SQL, etc.")
+Rel(joinSystem, k8s, "Deployed on", "k8s API")
+@enduml
