@@ -1,0 +1,35 @@
+eugene@Eugenes-MacBook-Pro parallel-compute-language-mvp % ./build/Quicksort
+1682ms
+total calls: 5975
+calls per thread
+thread 0 calls 870
+thread 1 calls 667
+thread 2 calls 791
+thread 3 calls 783
+thread 4 calls 633
+thread 5 calls 730
+thread 6 calls 795
+thread 7 calls 706
+is sorted: 1
+eugene@Eugenes-MacBook-Pro parallel-compute-language-mvp % ./build/Quicksort
+2112ms
+total calls: 6071
+calls per thread
+thread 0 calls 1637
+thread 1 calls 1585
+thread 2 calls 1559
+thread 3 calls 1290
+is sorted: 1
+eugene@Eugenes-MacBook-Pro parallel-compute-language-mvp % ./build/Quicksort
+3690ms
+total calls: 5967
+calls per thread
+thread 0 calls 3052
+thread 1 calls 2915
+is sorted: 1
+eugene@Eugenes-MacBook-Pro parallel-compute-language-mvp % ./build/Quicksort
+6070ms
+total calls: 5857
+calls per thread
+thread 0 calls 5857
+is sorted: 1

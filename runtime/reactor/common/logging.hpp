@@ -20,7 +20,7 @@ inline void runtime_assert(bool condition, const std::string_view& message) noex
 
 inline void print(const std::string_view& message) noexcept {
     #ifndef NDEBUG
-    std::cerr << message << std::endl;
+    std::cout << message << std::endl;
     #endif
 }
 

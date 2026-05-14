@@ -1,3 +1,4 @@
 add_subdirectory(common)
 add_subdirectory(distributed)
 add_subdirectory(parallel)
+add_subdirectory(parallel_improved)

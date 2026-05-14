@@ -1,0 +1,2 @@
+add_executable(Quicksort main.cpp)
+target_link_libraries(Quicksort PRIVATE ParallelImprovedReactor)
