@@ -8,6 +8,7 @@
 #include <runtime/reactor/common/type_system.hpp>
 
 #include <map>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,9 @@ using boost::redis::request;
 using boost::redis::response;
 
 namespace reactor::redis {
+
+inline constexpr auto kChannelMessageNotification = "gojo:channel:messages";
+inline constexpr auto kReactionCreatedNotification = "gojo:reaction:created";
 
 using Keys = std::vector<std::string>;
 using AttrNames = std::vector<std::string>;
@@ -31,11 +35,14 @@ public:
     awaitable<void> PushToChannel(const std::string& channel_id, const Object& object);
 
     awaitable<void> NewExecQueue(const std::string& exec_queue_id);
+    awaitable<void> RegisterReaction(const std::string& reaction_id, const std::string& exec_queue_id);
 
     awaitable<Objects> ScheduleExecution(const std::string& exec_queue_id, const std::vector<std::string>& channel_ids);
     awaitable<void> CommitExecution(const std::string& exec_queue_id, const std::map<std::string, Objects>& channel_msgs_map);
 
     awaitable<KeyToAttrsMap> GetAttributes(const Keys& keys, const AttrNames& attribute_names);
+
+    awaitable<bool> Barrier(std::size_t expected_processes);
 
 private:
     Pointer<connection> conn_ptr_;

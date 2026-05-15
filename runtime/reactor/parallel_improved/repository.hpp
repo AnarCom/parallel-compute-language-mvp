@@ -13,7 +13,7 @@
 
 namespace reactor {
 
-constexpr std::ptrdiff_t max_runner_threads = 1;
+constexpr std::ptrdiff_t max_runner_threads = 6;
 constexpr std::ptrdiff_t max_schedulled_calls = 1024;
 
 class Lockable {

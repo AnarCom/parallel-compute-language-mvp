@@ -12,6 +12,17 @@ thread 6 calls 795
 thread 7 calls 706
 is sorted: 1
 eugene@Eugenes-MacBook-Pro parallel-compute-language-mvp % ./build/Quicksort
+1499ms
+total calls: 5958
+calls per thread
+thread 0 calls 985
+thread 1 calls 956
+thread 2 calls 1005
+thread 3 calls 983
+thread 4 calls 1010
+thread 5 calls 1019
+is sorted: 1
+eugene@Eugenes-MacBook-Pro parallel-compute-language-mvp % ./build/Quicksort
 2112ms
 total calls: 6071
 calls per thread
