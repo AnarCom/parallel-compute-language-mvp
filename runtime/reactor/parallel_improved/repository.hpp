@@ -13,8 +13,11 @@
 
 namespace reactor {
 
-constexpr std::ptrdiff_t max_runner_threads = 6;
-constexpr std::ptrdiff_t max_schedulled_calls = 1024;
+constexpr std::ptrdiff_t max_runner_threads = 8;
+constexpr size_t calls_queue_node_size = 4096;
+constexpr size_t calls_queue_batch_size = 4;
+constexpr size_t calls_queue_batch_threshold = 16;
+constexpr size_t semaphore_mult = 64;
 
 class Lockable {
 public:
@@ -65,9 +68,40 @@ private:
 using Reactions = std::list<ReactionPointer>;
 
 struct SchedulledCall {
+    mutable std::binary_semaphore lock;
+
     Objects inputs;
     Objects context;
     Runnable* runnable;
+
+    SchedulledCall();
+};
+
+struct CallQueueNode: public Lockable {
+    std::atomic_uint64_t next_write_pos;
+    std::atomic_uint64_t next_read_pos;
+
+    std::shared_ptr<CallQueueNode> next;
+    std::array<SchedulledCall, calls_queue_node_size> calls;
+
+    CallQueueNode();
+    std::shared_ptr<CallQueueNode> AllocateNext();
+};
+
+struct CallQueueWriteIterator {
+    std::shared_ptr<CallQueueNode> node;
+    size_t global_offset = 0;
+
+    void ScheduleCall(Objects inputs, Objects context, Runnable* runnable);
+    size_t GetLastPos();
+};
+
+struct CallQueueReadIterator {
+    std::shared_ptr<CallQueueNode> node;
+    size_t global_offset = 0;
+
+    std::tuple<SchedulledCall*, size_t> GetNextCall();
+    size_t GetLastPos();
 };
 
 struct ChannelData : public Lockable {
@@ -96,21 +130,15 @@ public:
     Pointer<ChannelBase> NewChannel(ChannelMode mode = ChannelMode::Async, Type payload_type = Type::Unit()) override;
     void Run(uint64_t main_runnable_id, std::unordered_map<uint64_t, Runnable*> runnable_map) override;
 
-    std::atomic_uint64_t total_calls;
-    std::vector<std::atomic_uint64_t> calls_per_thread;
-
 private:
     using QueuesMap = std::map<uint64_t, QueuePointer>;
 
-    void RunRoutine(size_t thread_index) noexcept;
+    void RunRoutine(size_t thread_index, std::shared_ptr<CallQueueNode> node) noexcept;
     void ScheduleCall(Objects inputs, Objects context, uint64_t runnable_id) noexcept;
 
-    std::deque<SchedulledCall> calls;
     std::atomic_uint64_t next_id;
 
     std::atomic<bool> is_complete;
-    std::atomic<std::ptrdiff_t> active_threads;
-    std::counting_semaphore<max_schedulled_calls> calls_semaphore;
     std::unordered_map<uint64_t, Runnable*> runnable_map_;
 
     friend struct ChannelReference;

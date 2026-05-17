@@ -11,7 +11,7 @@
 
 constexpr auto GetRepo = &reactor::ImprovedRepository::GetRepository;
 constexpr size_t MaxRand = 1'000'000'000;
-constexpr size_t SortSize = 1'000'000;
+constexpr size_t SortSize = 10'000;
 
 static std::mutex lock;
 static std::chrono::time_point<std::chrono::steady_clock> start;
@@ -59,10 +59,9 @@ class Split: public reactor::Runnable {
 public:
     Split() {}
 
-    void operator()(reactor::Objects inputs, reactor::Objects context) override {
+    void operator()(reactor::Objects inputs, reactor::Objects) override {
         auto values = inputs[0].AsTuple()[0];
         auto reply = inputs[0].AsTuple()[1];
-        auto split = context[0];
 
         if (values.AsList().size() <= 1) {
             reply.AsChannel()->Push(values);
@@ -75,14 +74,17 @@ public:
 
         GetRepo().RegisterJoinCase({leftReply, rightReply}, {reply, pivot}, 1);
 
+        auto nextSplit = GetRepo().NewChannel();
+        GetRepo().RegisterJoinCase({nextSplit}, {}, 0);
+
         if (left.AsList().size() > 1) {
-            split.AsChannel()->Push(reactor::Object::Tuple({left, reactor::Object::Channel(leftReply)}));
+            nextSplit->Push(reactor::Object::Tuple({left, reactor::Object::Channel(leftReply)}));
         } else {
             leftReply->Push(left);
         }
 
         if (right.AsList().size() > 1) {
-            split.AsChannel()->Push(reactor::Object::Tuple({right, reactor::Object::Channel(rightReply)}));
+            nextSplit->Push(reactor::Object::Tuple({right, reactor::Object::Channel(rightReply)}));
         } else {
             rightReply->Push(right);
         }
@@ -114,13 +116,8 @@ public:
 
     void operator()(reactor::Objects inputs, reactor::Objects) override {
         auto duration = std::chrono::steady_clock::now() - start;
-        std::cout << "gojo duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(duration) << std::endl;
-        std::cout << "total calls:   " << GetRepo().total_calls.load() << std::endl;
-        std::cout << "calls per thread" << std::endl;
-        for (size_t i = 0; i < reactor::max_runner_threads; ++i) {
-            std::cout << "thread " << i << " calls " << GetRepo().calls_per_thread[i] << std::endl;
-        }
-        std::cout << "is sorted: " << std::is_sorted(
+        std::cout << "gojo duration:  " << std::chrono::duration_cast<std::chrono::milliseconds>(duration) << std::endl;
+        std::cout << "gojo is sorted: " << std::is_sorted(
             inputs.begin(), inputs.end(),
             [](const reactor::Object& left, const reactor::Object& right){ return left.AsInt() < right.AsInt(); }
         ) << std::endl;
@@ -206,7 +203,7 @@ void QuicksortStl() {
 
 int main() {
     QuicksortBaseline();
-    QuicksortStl();
+    // QuicksortStl();
 
     std::unordered_map<uint64_t, reactor::Runnable*> runnable_map = {
         {0, new Split()},

@@ -9,6 +9,8 @@
 
 namespace reactor {
 
+thread_local CallQueueWriteIterator write_iterator;
+
 void Lockable::Lock() const noexcept {
     lock_.lock();
 }
@@ -48,6 +50,52 @@ std::shared_ptr<Reaction> ReactionPointer::operator->() noexcept {
 
 size_t ReactionPointer::index() const noexcept {
     return index_;
+}
+
+SchedulledCall::SchedulledCall() : lock(0) {}
+
+CallQueueNode::CallQueueNode() : next_write_pos(0), next_read_pos(0) {}
+
+std::shared_ptr<CallQueueNode> CallQueueNode::AllocateNext() {
+    auto guard = Guard();
+
+    if (!static_cast<bool>(next)) {
+        next = std::make_shared<CallQueueNode>();
+    }
+    return next;
+}
+
+void CallQueueWriteIterator::ScheduleCall(Objects inputs, Objects context, Runnable* runnable) {
+    size_t pos = node->next_write_pos.fetch_add(1, std::memory_order_relaxed);
+    if (pos < calls_queue_node_size) {
+        node->calls[pos].inputs = inputs;
+        node->calls[pos].context = context;
+        node->calls[pos].runnable = runnable;
+        node->calls[pos].lock.release();
+        return;
+    }
+    global_offset += calls_queue_node_size;
+    node = node->AllocateNext();
+    ScheduleCall(inputs, context, runnable);
+}
+
+size_t CallQueueWriteIterator::GetLastPos() {
+    return global_offset + node->next_write_pos.load(std::memory_order_relaxed);
+}
+
+std::tuple<SchedulledCall*, size_t> CallQueueReadIterator::GetNextCall() {
+    size_t fetch_amount = write_iterator.GetLastPos() > (GetLastPos() + calls_queue_batch_threshold) ? calls_queue_batch_size : 1;
+    size_t pos = node->next_read_pos.fetch_add(fetch_amount, std::memory_order_relaxed);
+    if (pos < calls_queue_node_size) {
+        return {&(node->calls[pos]), std::min(pos + fetch_amount, calls_queue_node_size) - pos};
+    }
+    global_offset += calls_queue_node_size;
+    node = node->AllocateNext();
+    return GetNextCall();
+}
+
+size_t CallQueueReadIterator::GetLastPos() {
+    return global_offset + node->next_read_pos.load(std::memory_order_relaxed);
 }
 
 ChannelData::ChannelData(uint64_t id) noexcept
@@ -143,67 +191,38 @@ void ImprovedRepository::Run(uint64_t main_runnable_id, std::unordered_map<uint6
     std::vector<std::thread> runner_threads;
     runner_threads.reserve(max_runner_threads);
 
-    {
-        auto guard = Guard();
-        for (auto i = 0; i < max_runner_threads; ++i) {
-            runner_threads.emplace_back(
-                std::bind(&ImprovedRepository::RunRoutine, this, i));
-        }
-
-        calls.push_back({Objects{}, Objects{}, main_runnable_it->second});
-        calls_semaphore.release();
-    }
-
-    while (!is_complete.load()) {
-        std::this_thread::yield();
-    }
+    auto call_queue_node = std::make_shared<CallQueueNode>();
 
     for (auto i = 0; i < max_runner_threads; ++i) {
-        calls_semaphore.release();
+        runner_threads.emplace_back(
+            std::bind(&ImprovedRepository::RunRoutine, this, i, call_queue_node));
     }
+
+    CallQueueWriteIterator{.node = call_queue_node}.ScheduleCall(Objects{}, Objects{}, main_runnable_it->second);
+
     for (auto& runner_thread : runner_threads) {
         runner_thread.join();
     }
 }
 
-ImprovedRepository::ImprovedRepository()
-    : total_calls(0),
-      calls_per_thread(max_runner_threads),
-      calls(),
-      next_id(0),
-      is_complete(false),
-      active_threads(0),
-      calls_semaphore(0) {}
+ImprovedRepository::ImprovedRepository() : next_id(0), is_complete(false) {}
 
-void ImprovedRepository::RunRoutine(size_t thread_index) noexcept {
+void ImprovedRepository::RunRoutine(size_t thread_index, std::shared_ptr<CallQueueNode> node) noexcept {
+    write_iterator = CallQueueWriteIterator{.node = node};
+    auto read_iterator = CallQueueReadIterator{.node = node}; 
     while (true) {
-        calls_semaphore.acquire();
-        if (is_complete.load()) {
-            return;
+        auto [call_batch_ptr, batch_size] = read_iterator.GetNextCall();
+        for (size_t i = 0; i < batch_size; ++i) {
+            auto call = call_batch_ptr + i;
+            call->lock.acquire();
+            call->runnable->operator()(call->inputs, call->context);
         }
-        total_calls.fetch_add(1, std::memory_order_relaxed);
-        calls_per_thread[thread_index].fetch_add(1, std::memory_order_relaxed);
-        SchedulledCall call;
-        {
-            auto guard = Guard();
-            debug::runtime_assert(!calls.empty(),
-                                  "scheduled routine queue is empty");
-            call = std::move(calls.front());
-            calls.pop_front();
-            ++active_threads;
-        }
-
-        call.runnable->operator()(call.inputs, call.context);
-        --active_threads;
     }
 }
 
 void ImprovedRepository::ScheduleCall(Objects inputs, Objects context, uint64_t runnable_id) noexcept {
     auto runnable = runnable_map_[runnable_id];
-    auto guard = Guard();
-
-    calls.push_back(SchedulledCall{inputs, context, runnable});
-    calls_semaphore.release();
+    write_iterator.ScheduleCall(inputs, context, runnable);
 }
 
 }  // namespace reactor
