@@ -10,8 +10,21 @@
 #include <runtime/reactor/parallel_improved/repository.hpp>
 
 constexpr auto GetRepo = &reactor::ImprovedRepository::GetRepository;
+constexpr size_t MaxRand = 1'000'000'000;
+constexpr size_t SortSize = 1'000'000;
+
 static std::mutex lock;
 static std::chrono::time_point<std::chrono::steady_clock> start;
+
+std::vector<int> GenerateUnsorted(size_t size = SortSize) {
+    std::random_device rnd_device;
+    std::mt19937 mersenne_engine {rnd_device()};
+    std::uniform_int_distribution<int> dist {1, MaxRand};
+    auto gen = [&](){ return dist(mersenne_engine); };
+    std::vector<int> raw_values(size);
+    std::generate(raw_values.begin(), raw_values.end(), gen);
+    return raw_values;
+}
 
 std::tuple<reactor::Object, reactor::Object, reactor::Object> partition(const reactor::Object& values) noexcept {
     auto value_it = values.AsList().begin();
@@ -51,13 +64,8 @@ public:
         auto reply = inputs[0].AsTuple()[1];
         auto split = context[0];
 
-        if (values.AsList().size() <= 1000) {
-            auto values_copy = values.AsList();
-            std::sort(
-                values_copy.begin(), values_copy.end(),
-                [](const reactor::Object& left, const reactor::Object& right){ return left.AsInt() < right.AsInt(); }
-            );
-            reply.AsChannel()->Push(reactor::Object::List(values_copy));
+        if (values.AsList().size() <= 1) {
+            reply.AsChannel()->Push(values);
             return;
         }
 
@@ -106,8 +114,8 @@ public:
 
     void operator()(reactor::Objects inputs, reactor::Objects) override {
         auto duration = std::chrono::steady_clock::now() - start;
-        std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(duration) << std::endl;
-        std::cout << "total calls: " << GetRepo().total_calls.load() << std::endl;
+        std::cout << "gojo duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(duration) << std::endl;
+        std::cout << "total calls:   " << GetRepo().total_calls.load() << std::endl;
         std::cout << "calls per thread" << std::endl;
         for (size_t i = 0; i < reactor::max_runner_threads; ++i) {
             std::cout << "thread " << i << " calls " << GetRepo().calls_per_thread[i] << std::endl;
@@ -129,23 +137,18 @@ public:
     TestMain() {}
 
     void operator()(reactor::Objects inputs, reactor::Objects) override {
-        std::random_device rnd_device;
-        std::mt19937 mersenne_engine {rnd_device()};
-        std::uniform_int_distribution<int> dist {1, 100000};
-        auto gen = [&](){ return dist(mersenne_engine); };
-        std::vector<int> raw_values(1000000);
-        std::generate(raw_values.begin(), raw_values.end(), gen);
+        std::vector<int> raw_values = GenerateUnsorted();
 
         reactor::Objects obj_values(raw_values.size());
         std::transform(raw_values.begin(), raw_values.end(), obj_values.begin(), &reactor::Object::Int);
         auto values = reactor::Object::List(std::move(obj_values), reactor::Type::Int());
 
+        start = std::chrono::steady_clock::now();
         auto reply = GetRepo().NewChannel();
         GetRepo().RegisterJoinCase({reply}, {}, 2);
 
         auto split = GetRepo().NewChannel();
         GetRepo().RegisterJoinCase({split}, {reactor::Object::Channel(split)}, 0);
-        start = std::chrono::steady_clock::now();
         split->Push(reactor::Object::Tuple({values, reactor::Object::Channel(reply)}));
     }
 
@@ -154,7 +157,57 @@ public:
     }
 };
 
+std::tuple<reactor::Object, reactor::Object, reactor::Object> QuicksortRecurse(
+    reactor::Object left, reactor::Object pivot, reactor::Object right) {
+    
+    reactor::Object leftResult = left, rightResult = right;
+    if (left.AsList().size() > 1) {
+        leftResult = std::apply(concat, std::apply(QuicksortRecurse, partition(left)));
+    }
+    if (right.AsList().size() > 1) {
+        rightResult = std::apply(concat, std::apply(QuicksortRecurse, partition(right)));
+    }
+    return {leftResult, pivot, rightResult};
+}
+
+void QuicksortBaseline() {
+    std::vector<int> raw_values = GenerateUnsorted();
+
+    reactor::Objects obj_values(raw_values.size());
+    std::transform(raw_values.begin(), raw_values.end(), obj_values.begin(), &reactor::Object::Int);
+    auto values = reactor::Object::List(std::move(obj_values), reactor::Type::Int());
+
+    auto baseline_start = std::chrono::steady_clock::now();
+    auto sorted_values = std::apply(concat, std::apply(QuicksortRecurse, partition(values)));
+
+    auto baseline_duration = std::chrono::steady_clock::now() - baseline_start;
+    std::cout << "baseline duration:  " << std::chrono::duration_cast<std::chrono::milliseconds>(baseline_duration) << std::endl;
+
+    std::cout << "baseline is sorted: " << std::is_sorted(
+        sorted_values.AsList().begin(), sorted_values.AsList().end(),
+        [](const reactor::Object& left, const reactor::Object& right){ return left.AsInt() < right.AsInt(); }
+    ) << "\n" << std::endl;
+}
+
+void QuicksortStl() {
+    std::vector<int> raw_values = GenerateUnsorted();
+
+    reactor::Objects obj_values(raw_values.size());
+    std::transform(raw_values.begin(), raw_values.end(), obj_values.begin(), &reactor::Object::Int);
+
+    auto stl_start = std::chrono::steady_clock::now();
+    std::sort(
+        obj_values.begin(), obj_values.end(),
+        [](const reactor::Object& left, const reactor::Object& right){ return left.AsInt() < right.AsInt(); }
+    );
+    auto stl_duration = std::chrono::steady_clock::now() - stl_start;
+    std::cout << "stl duration: " << std::chrono::duration_cast<std::chrono::milliseconds>(stl_duration) << "\n" << std::endl;
+}
+
 int main() {
+    QuicksortBaseline();
+    QuicksortStl();
+
     std::unordered_map<uint64_t, reactor::Runnable*> runnable_map = {
         {0, new Split()},
         {1, new MergeSorted()},
