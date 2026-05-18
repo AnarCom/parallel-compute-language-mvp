@@ -29,6 +29,7 @@ public:
     virtual std::any visitFunctionDecl(TParser::FunctionDeclContext *ctx) override;
     virtual std::any visitDeclaration(TParser::DeclarationContext *ctx) override;
     virtual std::any visitStatement(TParser::StatementContext *ctx) override;
+    virtual std::any visitExpression(TParser::ExpressionContext *ctx) override;
     virtual std::any visitExpressionStmt(TParser::ExpressionStmtContext *ctx) override;
     virtual std::any visitEmitStmt(TParser::EmitStmtContext *ctx) override;
     virtual std::any visitSyncReturnStmt(TParser::SyncReturnStmtContext *ctx) override;
@@ -40,6 +41,12 @@ private:
     std::ostream& GetOut();
     void ProcessDefaultVarDecl(TParser::Type_Context* typeCtx, TParser::IdentifierListContext* identifierListCtx);
     std::string GetCppType(TParser::Type_Context* typeCtx);
+    std::string GetObjectTypeForPrimitiveType(const std::string& typeIdentifier);
+    void ProcessPrimaryExpr(TParser::PrimaryExprContext* ctx);
+    void BuildTypeForTypeLitaral(TParser::TypeLitContext* ctx, std::vector<std::string>& types);
+    void BuildTypeForLitaralType(TParser::LiteralTypeContext *ctx, std::vector<std::string>& types);
+    void ProcessArrayDef(TParser::CompositeLitContext* ctx);
+    void WriteArrayElement(TParser::ElementContext *ctx, const std::vector<std::string>& types, std::size_t curDepth);
 
 private:
     std::size_t indent_ = 0;

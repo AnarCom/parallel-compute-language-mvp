@@ -23,43 +23,45 @@ public:
   enum {
     AS = 1, ASYNC = 2, BREAK = 3, CASE = 4, CONST = 5, CONTINUE = 6, ELSE = 7, 
     FOR = 8, FROM = 9, FUNC = 10, JOIN = 11, IF = 12, NIL_LIT = 13, RETURN = 14, 
-    SYNC = 15, VAR = 16, IDENTIFIER = 17, L_PAREN = 18, R_PAREN = 19, L_CURLY = 20, 
-    R_CURLY = 21, L_BRACKET = 22, R_BRACKET = 23, ASSIGN = 24, COMMA = 25, 
-    SEMI = 26, COLON = 27, PLUS_PLUS = 28, MINUS_MINUS = 29, DECLARE_ASSIGN = 30, 
-    LOGICAL_OR = 31, LOGICAL_AND = 32, SYNC_RETURN = 33, EQUALS = 34, NOT_EQUALS = 35, 
-    LESS = 36, LESS_OR_EQUALS = 37, GREATER = 38, GREATER_OR_EQUALS = 39, 
-    OR = 40, DIV = 41, MOD = 42, LSHIFT = 43, RSHIFT = 44, BIT_CLEAR = 45, 
-    UNDERLYING = 46, EXCLAMATION = 47, PLUS = 48, MINUS = 49, CARET = 50, 
-    STAR = 51, AMPERSAND = 52, EMIT = 53, DECIMAL_LIT = 54, BINARY_LIT = 55, 
-    OCTAL_LIT = 56, HEX_LIT = 57, FLOAT_LIT = 58, DECIMAL_FLOAT_LIT = 59, 
-    HEX_FLOAT_LIT = 60, IMAGINARY_LIT = 61, RUNE_LIT = 62, BYTE_VALUE = 63, 
-    OCTAL_BYTE_VALUE = 64, HEX_BYTE_VALUE = 65, LITTLE_U_VALUE = 66, BIG_U_VALUE = 67, 
-    RAW_STRING_LIT = 68, INTERPRETED_STRING_LIT = 69, WS = 70, COMMENT = 71, 
-    TERMINATOR = 72, LINE_COMMENT = 73, WS_NLSEMI = 74, COMMENT_NLSEMI = 75, 
-    LINE_COMMENT_NLSEMI = 76, EOS = 77, OTHER = 78
+    SYNC = 15, STRUCT = 16, TYPE = 17, VAR = 18, IDENTIFIER = 19, L_PAREN = 20, 
+    R_PAREN = 21, L_CURLY = 22, R_CURLY = 23, L_BRACKET = 24, R_BRACKET = 25, 
+    ASSIGN = 26, COMMA = 27, SEMI = 28, COLON = 29, DOT = 30, PLUS_PLUS = 31, 
+    MINUS_MINUS = 32, DECLARE_ASSIGN = 33, LOGICAL_OR = 34, LOGICAL_AND = 35, 
+    SYNC_RETURN = 36, EQUALS = 37, NOT_EQUALS = 38, LESS = 39, LESS_OR_EQUALS = 40, 
+    GREATER = 41, GREATER_OR_EQUALS = 42, OR = 43, DIV = 44, MOD = 45, LSHIFT = 46, 
+    RSHIFT = 47, BIT_CLEAR = 48, UNDERLYING = 49, EXCLAMATION = 50, PLUS = 51, 
+    MINUS = 52, CARET = 53, STAR = 54, AMPERSAND = 55, EMIT = 56, DECIMAL_LIT = 57, 
+    BINARY_LIT = 58, OCTAL_LIT = 59, HEX_LIT = 60, FLOAT_LIT = 61, DECIMAL_FLOAT_LIT = 62, 
+    HEX_FLOAT_LIT = 63, IMAGINARY_LIT = 64, RUNE_LIT = 65, BYTE_VALUE = 66, 
+    OCTAL_BYTE_VALUE = 67, HEX_BYTE_VALUE = 68, LITTLE_U_VALUE = 69, BIG_U_VALUE = 70, 
+    RAW_STRING_LIT = 71, INTERPRETED_STRING_LIT = 72, WS = 73, COMMENT = 74, 
+    TERMINATOR = 75, LINE_COMMENT = 76, WS_NLSEMI = 77, COMMENT_NLSEMI = 78, 
+    LINE_COMMENT_NLSEMI = 79, EOS = 80, OTHER = 81
   };
 
   enum {
     RuleSourceFile = 0, RuleIdentifier = 1, RuleDeclaration = 2, RuleConstDecl = 3, 
-    RuleConstSpec = 4, RuleIdentifierList = 5, RuleExpressionList = 6, RuleTypeSpec = 7, 
-    RuleAliasDecl = 8, RuleTypeDef = 9, RuleTypeParameters = 10, RuleTypeParameterDecl = 11, 
-    RuleTypeElement = 12, RuleTypeTerm = 13, RuleFunctionDecl = 14, RuleVarDecl = 15, 
-    RuleVarSpec = 16, RuleBlock = 17, RuleStatementList = 18, RuleStatement = 19, 
-    RuleSimpleStmt = 20, RuleExpressionStmt = 21, RuleSyncReturnStmt = 22, 
-    RuleEmitStmt = 23, RuleIncDecStmt = 24, RuleAssignment = 25, RuleAssign_op = 26, 
-    RuleShortVarDecl = 27, RuleReturnStmt = 28, RuleBreakStmt = 29, RuleContinueStmt = 30, 
-    RuleIfStmt = 31, RuleTypeList = 32, RuleJoinStmt = 33, RuleMatchClause = 34, 
-    RuleMatchCase = 35, RuleFromChanAs = 36, RuleForStmt = 37, RuleCondition = 38, 
-    RuleForClause = 39, RuleType_ = 40, RuleTypeArgs = 41, RuleTypeName = 42, 
-    RuleTypeLit = 43, RuleArrayType = 44, RuleArrayLength = 45, RuleElementType = 46, 
-    RuleAsyncChannelType = 47, RuleSyncChannelType = 48, RuleFunctionType = 49, 
-    RuleSignature = 50, RuleResult = 51, RuleParameters = 52, RuleParameterDecl = 53, 
-    RuleExpression = 54, RulePrimaryExpr = 55, RuleConversion = 56, RuleOperand = 57, 
-    RuleLiteral = 58, RuleBasicLit = 59, RuleInteger = 60, RuleOperandName = 61, 
-    RuleCompositeLit = 62, RuleLiteralType = 63, RuleLiteralValue = 64, 
-    RuleElementList = 65, RuleKeyedElement = 66, RuleKey = 67, RuleElement = 68, 
-    RuleString_ = 69, RuleFunctionLit = 70, RuleIndex = 71, RuleArguments = 72, 
-    RuleEos = 73
+    RuleConstSpec = 4, RuleIdentifierList = 5, RuleExpressionList = 6, RuleTypeDecl = 7, 
+    RuleTypeSpec = 8, RuleAliasDecl = 9, RuleTypeDef = 10, RuleTypeParameters = 11, 
+    RuleTypeParameterDecl = 12, RuleTypeElement = 13, RuleTypeTerm = 14, 
+    RuleFunctionDecl = 15, RuleVarDecl = 16, RuleVarSpec = 17, RuleBlock = 18, 
+    RuleStatementList = 19, RuleStatement = 20, RuleSimpleStmt = 21, RuleExpressionStmt = 22, 
+    RuleSyncReturnStmt = 23, RuleEmitStmt = 24, RuleIncDecStmt = 25, RuleAssignment = 26, 
+    RuleAssign_op = 27, RuleShortVarDecl = 28, RuleReturnStmt = 29, RuleBreakStmt = 30, 
+    RuleContinueStmt = 31, RuleIfStmt = 32, RuleTypeList = 33, RuleJoinStmt = 34, 
+    RuleMatchClause = 35, RuleMatchCase = 36, RuleFromChanAs = 37, RuleForStmt = 38, 
+    RuleCondition = 39, RuleForClause = 40, RuleType_ = 41, RuleTypeArgs = 42, 
+    RuleTypeName = 43, RuleTypeLit = 44, RuleArrayType = 45, RuleArrayLength = 46, 
+    RuleElementType = 47, RuleSliceType = 48, RuleAsyncChannelType = 49, 
+    RuleSyncChannelType = 50, RuleFunctionType = 51, RuleSignature = 52, 
+    RuleResult = 53, RuleParameters = 54, RuleParameterDecl = 55, RuleExpression = 56, 
+    RulePrimaryExpr = 57, RuleConversion = 58, RuleOperand = 59, RuleLiteral = 60, 
+    RuleBasicLit = 61, RuleInteger = 62, RuleOperandName = 63, RuleQualifiedIdent = 64, 
+    RuleCompositeLit = 65, RuleLiteralType = 66, RuleLiteralValue = 67, 
+    RuleElementList = 68, RuleKeyedElement = 69, RuleKey = 70, RuleElement = 71, 
+    RuleStructType = 72, RuleFieldDecl = 73, RuleString_ = 74, RuleEmbeddedField = 75, 
+    RuleFunctionLit = 76, RuleIndex = 77, RuleSlice_ = 78, RuleArguments = 79, 
+    RuleEos = 80
   };
 
   explicit TParser(antlr4::TokenStream *input);
@@ -94,6 +96,7 @@ public:
   class ConstSpecContext;
   class IdentifierListContext;
   class ExpressionListContext;
+  class TypeDeclContext;
   class TypeSpecContext;
   class AliasDeclContext;
   class TypeDefContext;
@@ -134,6 +137,7 @@ public:
   class ArrayTypeContext;
   class ArrayLengthContext;
   class ElementTypeContext;
+  class SliceTypeContext;
   class AsyncChannelTypeContext;
   class SyncChannelTypeContext;
   class FunctionTypeContext;
@@ -149,6 +153,7 @@ public:
   class BasicLitContext;
   class IntegerContext;
   class OperandNameContext;
+  class QualifiedIdentContext;
   class CompositeLitContext;
   class LiteralTypeContext;
   class LiteralValueContext;
@@ -156,9 +161,13 @@ public:
   class KeyedElementContext;
   class KeyContext;
   class ElementContext;
+  class StructTypeContext;
+  class FieldDeclContext;
   class String_Context;
+  class EmbeddedFieldContext;
   class FunctionLitContext;
   class IndexContext;
+  class Slice_Context;
   class ArgumentsContext;
   class EosContext; 
 
@@ -201,6 +210,7 @@ public:
     DeclarationContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
     ConstDeclContext *constDecl();
+    TypeDeclContext *typeDecl();
     VarDeclContext *varDecl();
 
 
@@ -276,6 +286,25 @@ public:
   };
 
   ExpressionListContext* expressionList();
+
+  class  TypeDeclContext : public antlr4::ParserRuleContext {
+  public:
+    TypeDeclContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *TYPE();
+    std::vector<TypeSpecContext *> typeSpec();
+    TypeSpecContext* typeSpec(size_t i);
+    antlr4::tree::TerminalNode *L_PAREN();
+    antlr4::tree::TerminalNode *R_PAREN();
+    std::vector<EosContext *> eos();
+    EosContext* eos(size_t i);
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  TypeDeclContext* typeDecl();
 
   class  TypeSpecContext : public antlr4::ParserRuleContext {
   public:
@@ -858,6 +887,7 @@ public:
   public:
     TypeNameContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
+    QualifiedIdentContext *qualifiedIdent();
     antlr4::tree::TerminalNode *IDENTIFIER();
 
 
@@ -872,7 +902,9 @@ public:
     TypeLitContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
     ArrayTypeContext *arrayType();
+    StructTypeContext *structType();
     FunctionTypeContext *functionType();
+    SliceTypeContext *sliceType();
     SyncChannelTypeContext *syncChannelType();
     AsyncChannelTypeContext *asyncChannelType();
 
@@ -888,9 +920,9 @@ public:
     ArrayTypeContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
     antlr4::tree::TerminalNode *L_BRACKET();
-    ArrayLengthContext *arrayLength();
     antlr4::tree::TerminalNode *R_BRACKET();
     ElementTypeContext *elementType();
+    ArrayLengthContext *arrayLength();
 
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
@@ -924,6 +956,21 @@ public:
   };
 
   ElementTypeContext* elementType();
+
+  class  SliceTypeContext : public antlr4::ParserRuleContext {
+  public:
+    SliceTypeContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *L_BRACKET();
+    antlr4::tree::TerminalNode *R_BRACKET();
+    ElementTypeContext *elementType();
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  SliceTypeContext* sliceType();
 
   class  AsyncChannelTypeContext : public antlr4::ParserRuleContext {
   public:
@@ -1072,8 +1119,16 @@ public:
     PrimaryExprContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
     OperandContext *operand();
+    std::vector<antlr4::tree::TerminalNode *> DOT();
+    antlr4::tree::TerminalNode* DOT(size_t i);
+    std::vector<IndexContext *> index();
+    IndexContext* index(size_t i);
+    std::vector<Slice_Context *> slice_();
+    Slice_Context* slice_(size_t i);
     std::vector<ArgumentsContext *> arguments();
     ArgumentsContext* arguments(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> IDENTIFIER();
+    antlr4::tree::TerminalNode* IDENTIFIER(size_t i);
 
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
@@ -1171,6 +1226,7 @@ public:
     OperandNameContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
     antlr4::tree::TerminalNode *IDENTIFIER();
+    QualifiedIdentContext *qualifiedIdent();
 
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
@@ -1178,6 +1234,21 @@ public:
   };
 
   OperandNameContext* operandName();
+
+  class  QualifiedIdentContext : public antlr4::ParserRuleContext {
+  public:
+    QualifiedIdentContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    std::vector<antlr4::tree::TerminalNode *> IDENTIFIER();
+    antlr4::tree::TerminalNode* IDENTIFIER(size_t i);
+    antlr4::tree::TerminalNode *DOT();
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  QualifiedIdentContext* qualifiedIdent();
 
   class  CompositeLitContext : public antlr4::ParserRuleContext {
   public:
@@ -1197,7 +1268,9 @@ public:
   public:
     LiteralTypeContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
+    StructTypeContext *structType();
     ArrayTypeContext *arrayType();
+    SliceTypeContext *sliceType();
     TypeNameContext *typeName();
     TypeArgsContext *typeArgs();
 
@@ -1283,6 +1356,42 @@ public:
 
   ElementContext* element();
 
+  class  StructTypeContext : public antlr4::ParserRuleContext {
+  public:
+    StructTypeContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *STRUCT();
+    antlr4::tree::TerminalNode *L_CURLY();
+    antlr4::tree::TerminalNode *R_CURLY();
+    std::vector<FieldDeclContext *> fieldDecl();
+    FieldDeclContext* fieldDecl(size_t i);
+    std::vector<EosContext *> eos();
+    EosContext* eos(size_t i);
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  StructTypeContext* structType();
+
+  class  FieldDeclContext : public antlr4::ParserRuleContext {
+  public:
+    TParser::String_Context *tag = nullptr;
+    FieldDeclContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    IdentifierListContext *identifierList();
+    Type_Context *type_();
+    EmbeddedFieldContext *embeddedField();
+    String_Context *string_();
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  FieldDeclContext* fieldDecl();
+
   class  String_Context : public antlr4::ParserRuleContext {
   public:
     String_Context(antlr4::ParserRuleContext *parent, size_t invokingState);
@@ -1296,6 +1405,21 @@ public:
   };
 
   String_Context* string_();
+
+  class  EmbeddedFieldContext : public antlr4::ParserRuleContext {
+  public:
+    EmbeddedFieldContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    TypeNameContext *typeName();
+    antlr4::tree::TerminalNode *STAR();
+    TypeArgsContext *typeArgs();
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  EmbeddedFieldContext* embeddedField();
 
   class  FunctionLitContext : public antlr4::ParserRuleContext {
   public:
@@ -1326,6 +1450,24 @@ public:
   };
 
   IndexContext* index();
+
+  class  Slice_Context : public antlr4::ParserRuleContext {
+  public:
+    Slice_Context(antlr4::ParserRuleContext *parent, size_t invokingState);
+    virtual size_t getRuleIndex() const override;
+    antlr4::tree::TerminalNode *L_BRACKET();
+    antlr4::tree::TerminalNode *R_BRACKET();
+    std::vector<antlr4::tree::TerminalNode *> COLON();
+    antlr4::tree::TerminalNode* COLON(size_t i);
+    std::vector<ExpressionContext *> expression();
+    ExpressionContext* expression(size_t i);
+
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+   
+  };
+
+  Slice_Context* slice_();
 
   class  ArgumentsContext : public antlr4::ParserRuleContext {
   public:

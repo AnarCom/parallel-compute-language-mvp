@@ -43,6 +43,10 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitTypeDecl(TParser::TypeDeclContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitTypeSpec(TParser::TypeSpecContext *ctx) override {
     return visitChildren(ctx);
   }
@@ -203,6 +207,10 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitSliceType(TParser::SliceTypeContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitAsyncChannelType(TParser::AsyncChannelTypeContext *ctx) override {
     return visitChildren(ctx);
   }
@@ -263,6 +271,10 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitQualifiedIdent(TParser::QualifiedIdentContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitCompositeLit(TParser::CompositeLitContext *ctx) override {
     return visitChildren(ctx);
   }
@@ -291,7 +303,19 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitStructType(TParser::StructTypeContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitFieldDecl(TParser::FieldDeclContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitString_(TParser::String_Context *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitEmbeddedField(TParser::EmbeddedFieldContext *ctx) override {
     return visitChildren(ctx);
   }
 
@@ -300,6 +324,10 @@ public:
   }
 
   virtual std::any visitIndex(TParser::IndexContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitSlice_(TParser::Slice_Context *ctx) override {
     return visitChildren(ctx);
   }
 

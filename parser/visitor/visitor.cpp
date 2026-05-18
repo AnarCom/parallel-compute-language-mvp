@@ -45,8 +45,22 @@ void Visitor::WritePredefinedFunctions() {
     GetOut() << "template <class T>" << std::endl;
     GetOut() << "void print(T var) {" << std::endl;
     GetOut() << "    std::cout << var << std::endl;" << std::endl;
-    GetOut() << "}" << std::endl;
+    GetOut() << "}" << std::endl <<std::endl;
 
+    GetOut() << "int len(const ListObject& list) {" << std::endl;
+    GetOut() << "    return list.elements().size();" << std::endl;
+    GetOut() << "}" << std::endl <<std::endl;
+
+    GetOut() << "ListObject& append(ListObject& list, ListObject& other) {" << std::endl;
+    GetOut() << "    list.elements().insert(list.elements().end(), other.elements().begin(), other.elements().end());" << std::endl;
+    GetOut() << "    return list;" << std::endl;
+    GetOut() << "}" << std::endl <<std::endl;
+
+    GetOut() << "template <class... T>";
+    GetOut() << "ListObject& append(ListObject& list, const T&... el) {" << std::endl;
+    GetOut() << "     (list.push_back(el), ...);" << std::endl;
+    GetOut() << "    return list;" << std::endl;
+    
     GetOut() << std::endl;
 }
 
@@ -153,11 +167,11 @@ void Visitor::ProcessDefaultVarDecl(TParser::Type_Context* typeCtx, TParser::Ide
         // array, function, sync or async channel
         if (auto syncCtx = typeLitCtx->syncChannelType(); syncCtx) {
             typeName = "ChannelPtr";
-            typeConstructor = "() //not implemented";
+            typeConstructor = "(ChannelMode::Sync) //not implemented";
         }
         else if (auto asyncCtx = typeLitCtx->asyncChannelType(); asyncCtx) {
             typeName = "ChannelPtr";
-            typeConstructor = " = repository__->NewChannel()";
+            typeConstructor = " = repository__->NewChannel(ChannelMode::Async, )";
         }
         else {
             // TODO: Process other types
@@ -180,13 +194,20 @@ std::any Visitor::visitVarDecl(TParser::VarDeclContext *ctx) {
             ProcessDefaultVarDecl(varSpec->type_(), varSpec->identifierList());
        }
        else {
-            // Deduce type from expr
-            if (varSpec->type_()) {
-                // check type if need
+            const auto& ids = varSpec->identifierList()->IDENTIFIER();
+            const auto& exprs = varSpec->expressionList()->expression();
+            if (exprs.size() > ids.size()) {
+                throw std::runtime_error("Assigning error");
             }
+            if (exprs.size() > 1 || ids.size() > 1) {
+                throw std::runtime_error("Multiple expressions assignment not implemented");
+            }
+            GetOutWithIndent() << "auto " << ids[0]->getText() << " = ";
+            visitExpression(exprs[0]);
+            GetOut() << ";" << std::endl;
        }
     }
-    return visitChildren(ctx);
+    return std::any{};
 }
 
 std::string Visitor::GetCppType(TParser::Type_Context* typeCtx) {
@@ -292,6 +313,134 @@ std::any Visitor::visitStatement(TParser::StatementContext *ctx) {
     return visitChildren(ctx);
 }
 
+std::string Visitor::GetObjectTypeForPrimitiveType(const std::string& typeIdentifier) {
+    if (typeIdentifier == "int") {
+            return "IntObject";
+    }
+    if (typeIdentifier == "string") {
+        return "StringObject";
+    }
+    if (typeIdentifier == "bool") {
+        return "BoolObject";
+    }
+    throw std::runtime_error("Unknown primitive type " + typeIdentifier);
+}
+
+void Visitor::BuildTypeForTypeLitaral(TParser::TypeLitContext *ctx, std::vector<std::string>& types) {
+    if (ctx->arrayType()) {
+        types.push_back("ListObject");
+    }
+    else if (ctx->asyncChannelType()) {
+        types.push_back("ChannelObject");
+    }
+    else {
+        throw std::runtime_error("This type not implemented yet");
+    }
+    
+    if (ctx->arrayType()->elementType()->type_()->typeName()) {
+        types.push_back(GetObjectTypeForPrimitiveType(ctx->arrayType()->elementType()->type_()->typeName()->getText()));
+    }
+    else {
+        BuildTypeForTypeLitaral(ctx->arrayType()->elementType()->type_()->typeLit(), types);
+    }
+}
+
+void Visitor::BuildTypeForLitaralType(TParser::LiteralTypeContext *ctx, std::vector<std::string>& types) {
+    if (ctx->arrayType()) {
+        types.push_back("ListObject");
+    }
+    else if (ctx->structType()) {
+        throw std::runtime_error("This type not implemented yet");
+    }
+    else {
+        throw std::runtime_error("This type not implemented yet");
+    }
+    if (ctx->arrayType()->elementType()->type_()->typeName()) {
+        types.push_back(GetObjectTypeForPrimitiveType(ctx->arrayType()->elementType()->type_()->typeName()->getText()));
+    }
+    else {
+        BuildTypeForTypeLitaral(ctx->arrayType()->elementType()->type_()->typeLit(), types);
+    }
+}
+
+void Visitor::WriteArrayElement(TParser::ElementContext *ctx, const std::vector<std::string>& types, std::size_t curDepth) {
+    if (curDepth >= types.size()) {
+        throw std::runtime_error("Invalid type literal or value for array");
+    }
+    auto type = types[curDepth];
+    if (ctx->expression()) {
+        GetOut() << type << "(" << ctx->expression()->getText() << ")";
+    }
+    else {
+        GetOut() << type << "({";
+        std::size_t idx = 0;
+        std::size_t size = ctx->literalValue()->elementList()->keyedElement().size();
+        for (const auto keyedElement : ctx->literalValue()->elementList()->keyedElement()) {
+            WriteArrayElement(keyedElement->element(), types, curDepth + 1);
+            if (idx < size - 1) {
+                GetOut() << ",";
+            }
+            ++idx;
+        }
+        GetOut() << "})";
+    }
+}
+
+void Visitor::ProcessArrayDef(TParser::CompositeLitContext *ctx) {
+    // TODO: Process length (reserve memory)
+    std::vector<std::string> types;
+    BuildTypeForLitaralType(ctx->literalType(), types);
+    GetOut() << types[0] << "({";
+    std::size_t idx = 0;
+    std::size_t size = ctx->literalValue()->elementList()->keyedElement().size();
+    for (const auto keyedElement : ctx->literalValue()->elementList()->keyedElement()) {
+        WriteArrayElement(keyedElement->element(), types, 1);
+        if (idx < size - 1) {
+            GetOut() << ",";
+        }
+        ++idx;
+    }
+    GetOut() << "})";
+}
+
+void Visitor::ProcessPrimaryExpr(TParser::PrimaryExprContext *ctx) {
+    auto literalCtx = ctx->operand()->literal();
+    if (!literalCtx) {
+        GetOut() << ctx->getText(); // (expr) or function call
+        return;
+    }
+    if (literalCtx->basicLit()) {
+        GetOut() << ctx->getText(); // just number or string or nil
+        return;
+    }
+    if (literalCtx->functionLit()) {
+        throw std::runtime_error("Lambda functions are not supported yet");
+    }
+    // Process composite type (array or struct)
+    auto compositeCtx = literalCtx->compositeLit();
+    if (compositeCtx->literalType()->arrayType()) {
+        ProcessArrayDef(compositeCtx);
+    }
+    else if (compositeCtx->literalType()->structType()) {
+        throw std::runtime_error("Structs are not supported yet");
+    }
+    else {
+        throw std::runtime_error("Unknown composite type");
+    }
+
+}
+
+std::any Visitor::visitExpression(TParser::ExpressionContext *ctx) {
+    if (ctx->primaryExpr()) {
+        ProcessPrimaryExpr(ctx->primaryExpr());
+    }
+    else {
+        GetOut() << ctx->getText(); // map standard arithmetics 1 to 1 to C++ (excluding complex internal expressions)
+    }
+
+    return std::any{};
+}
+
 std::any Visitor::visitExpressionStmt(TParser::ExpressionStmtContext *ctx) {
     GetOutWithIndent() << ctx->getText() << ";" << std::endl;
     return std::any{};
@@ -344,7 +493,9 @@ std::any Visitor::visitShortVarDecl(TParser::ShortVarDeclContext *ctx) {
         throw std::runtime_error("Multiple expressions assignment not implemented");
     }
     if (ids.size() == 1) {
-        GetOutWithIndent() << "auto " << ids[0]->getText() << " = " << exprs[0]->getText() << ";" << std::endl;
+        GetOutWithIndent() << "auto " << ids[0]->getText() << " = ";
+        visitExpression(exprs[0]);
+        GetOut() << ";" << std::endl;
         return std::any{};
     }
     std::string tupleName = "tuple" + std::to_string(helpingIndex++);
