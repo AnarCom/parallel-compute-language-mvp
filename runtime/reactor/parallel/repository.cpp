@@ -1,6 +1,7 @@
 #include "repository.hpp"
 
 #include <algorithm>
+#include <format>
 #include <iterator>
 #include <runtime/reactor/common/logging.hpp>
 #include <thread>
@@ -118,6 +119,7 @@ void CycleRepository::Run(uint64_t main_runnable_id, std::unordered_map<uint64_t
     }
 
     while (CheckCases()) {
+        std::this_thread::yield();
     }
 
     is_complete.store(true);
@@ -156,6 +158,8 @@ void CycleRepository::RunRoutine() noexcept {
             calls.pop_front();
             ++active_threads;
         }
+        
+        debug::print(std::format("Running reaction {} on thread {}", call.runnable->GetID(), std::this_thread::get_id()));
         call.runnable->operator()(call.inputs, call.context);
         --active_threads;
     }
@@ -165,6 +169,8 @@ bool CycleRepository::CheckCases() noexcept {
     auto guard = std::lock_guard(lock);
 
     const auto total_cases = cases.size();
+    // const auto total_channels = queues.size();
+    // debug::print(std::format("total_cases {}, total_channels {}", total_cases, total_channels));
     auto current_case = cases.begin();
     std::advance(current_case, std::min(cycle_offset, total_cases));
     for (size_t i = 0; i < total_cases; ++i) {

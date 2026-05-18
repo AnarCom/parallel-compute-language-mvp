@@ -10,6 +10,7 @@ namespace reactor {
 
 struct Config {
     uint64_t NodeID;
+    uint64_t ProgramsCount;
 
     std::string RedisAddr;
     std::string RedisUser;

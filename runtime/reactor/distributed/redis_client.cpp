@@ -1,12 +1,16 @@
 #include "redis_client.hpp"
 #include "redis_scripts/_headers/_scripts.hpp"
 
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
 // do not include this in any other .cpp or .hpp file
 #include <boost/redis/src.hpp>
 
 #include <iostream>
 #include <atomic>
+#include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 namespace reactor::redis {
@@ -25,6 +29,40 @@ inline Object DeserializeObject(const std::string& str) {
 inline std::string GenNode(const std::string& base) {
     static std::atomic<uint64_t> counter{0};
     return base + ":node:" + std::to_string(counter++);
+}
+
+constexpr auto kBarrierCounterKey = "gojo:barrier:counter";
+constexpr auto kBarrierGenerationKey = "gojo:barrier:generation";
+constexpr auto kBarrierChannel = "gojo:barrier:release";
+constexpr auto kBarrierArriveScript = R"(
+local count = redis.call('INCR', KEYS[1])
+if count == tonumber(ARGV[1]) then
+    redis.call('DEL', KEYS[1])
+    local generation = redis.call('INCR', KEYS[2])
+    redis.call('PUBLISH', KEYS[3], tostring(generation))
+end
+return count
+)";
+
+bool ConsumeUntilBarrierRelease(boost::redis::generic_response& resp, std::size_t current_generation) {
+    if (resp.has_error() || !resp.has_value()) {
+        return false;
+    }
+
+    while (!resp.value().empty()) {
+        const auto& nodes = resp.value();
+        if (nodes.size() >= 4 &&
+            nodes[1].value == "message" &&
+            nodes[2].value == kBarrierChannel) {
+            const auto release_generation = static_cast<std::size_t>(std::stoull(nodes[3].value));
+            if (release_generation > current_generation) {
+                return true;
+            }
+        }
+        boost::redis::consume_one(resp);
+    }
+
+    return false;
 }
 
 } // namespace
@@ -53,7 +91,14 @@ awaitable<void> RedisClient::PushToChannel(const std::string& channel_id, const 
 
     response<bool> resp;
     co_await conn_ptr_->async_exec(req, resp);
-    // TODO: check resp & retry
+
+    if (std::get<0>(resp).value()) {
+        request notify_req;
+        notify_req.push("PUBLISH", kChannelMessageNotification, channel_id);
+        response<std::int64_t> notify_resp;
+        co_await conn_ptr_->async_exec(notify_req, notify_resp);
+    }
+    // TODO: retry when push script reports stale tail
     co_return;
 }
 
@@ -66,6 +111,17 @@ awaitable<void> RedisClient::NewExecQueue(const std::string& exec_queue_id) {
 
     response<bool> resp;
     co_await conn_ptr_->async_exec(req, resp);
+    co_return;
+}
+
+awaitable<void> RedisClient::RegisterReaction(const std::string& reaction_id, const std::string& exec_queue_id) {
+    co_await NewExecQueue(exec_queue_id);
+
+    request notify_req;
+    notify_req.push("PUBLISH", kReactionCreatedNotification, reaction_id);
+    response<std::int64_t> notify_resp;
+    co_await conn_ptr_->async_exec(notify_req, notify_resp);
+
     co_return;
 }
 
@@ -170,6 +226,15 @@ awaitable<void> RedisClient::CommitExecution(
     req.push_range("EVAL", command);
     response<bool> resp;
     co_await conn_ptr_->async_exec(req, resp);
+
+    if (std::get<0>(resp).value()) {
+        for (const auto& channel_id : channel_ids) {
+            request notify_req;
+            notify_req.push("PUBLISH", kChannelMessageNotification, channel_id);
+            response<std::int64_t> notify_resp;
+            co_await conn_ptr_->async_exec(notify_req, notify_resp);
+        }
+    }
     co_return;
 }
 
@@ -208,6 +273,59 @@ awaitable<KeyToAttrsMap> RedisClient::GetAttributes(const Keys& keys, const Attr
     }
 
     co_return result;
+}
+
+awaitable<bool> RedisClient::Barrier(std::size_t expected_processes) {
+    if (expected_processes == 0) {
+        throw std::invalid_argument("barrier expects at least one process");
+    }
+
+    request subscribe_req;
+    subscribe_req.push("SUBSCRIBE", kBarrierChannel);
+    response<std::vector<std::string>> subscribe_resp;
+    co_await conn_ptr_->async_exec(subscribe_req, subscribe_resp);
+
+    boost::redis::generic_response pushes;
+    conn_ptr_->set_receive_response(pushes);
+
+    request generation_req;
+    generation_req.push("INCRBY", kBarrierGenerationKey, "0");
+    response<std::int64_t> generation_resp;
+    co_await conn_ptr_->async_exec(generation_req, generation_resp);
+    const auto current_generation = static_cast<std::size_t>(std::get<0>(generation_resp).value());
+
+    request arrive_req;
+    arrive_req.push(
+        "EVAL",
+        kBarrierArriveScript,
+        "3",
+        kBarrierCounterKey,
+        kBarrierGenerationKey,
+        kBarrierChannel,
+        std::to_string(expected_processes));
+    response<std::int64_t> arrive_resp;
+    co_await conn_ptr_->async_exec(arrive_req, arrive_resp);
+
+    const auto arrival_count = static_cast<std::size_t>(std::get<0>(arrive_resp).value());
+    const auto is_last_process = arrival_count == expected_processes;
+    if (!is_last_process) {
+        while (!ConsumeUntilBarrierRelease(pushes, current_generation)) {
+            boost::system::error_code ec;
+            co_await conn_ptr_->async_receive(
+                boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+            if (ec) {
+                throw boost::system::system_error(ec);
+            }
+        }
+    }
+
+    request unsubscribe_req;
+    unsubscribe_req.push("UNSUBSCRIBE", kBarrierChannel);
+    response<std::vector<std::string>> unsubscribe_resp;
+    co_await conn_ptr_->async_exec(unsubscribe_req, unsubscribe_resp);
+    conn_ptr_->set_receive_response(boost::redis::ignore);
+
+    co_return is_last_process;
 }
 
 } // namespace reactor::redis

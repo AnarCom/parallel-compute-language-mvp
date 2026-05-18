@@ -6,9 +6,14 @@
 #include <boost/asio/detached.hpp>
 #include <boost/redis/connection.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <future>
 #include <stdexcept>
 #include <stdlib.h>
 #include <thread>
+#include <vector>
 
 #include <runtime/reactor/common/helpers.hpp>
 #include <runtime/reactor/common/type_system.hpp>
@@ -91,6 +96,15 @@ protected:
         }
 
         co_return result;
+    }
+
+    asio::awaitable<void> DeleteKeys(const std::vector<std::string>& keys) {
+        boost::redis::request req;
+        req.push_range("DEL", keys);
+
+        boost::redis::response<std::int64_t> resp;
+        co_await conn->async_exec(req, resp);
+        co_return;
     }
 };
 
@@ -224,4 +238,72 @@ TEST_F(RedisClientTest, Commit) {
     ASSERT_EQ(node_key_to_attrs[out_tail][0], "");
     ASSERT_EQ(node_key_to_attrs[out_tail][1], "");
 
+}
+
+TEST_F(RedisClientTest, BarrierWaitsForExpectedProcessCount) {
+    constexpr std::size_t expected_processes = 3;
+
+    std::promise<void> reset_result;
+    auto reset_fut = reset_result.get_future();
+    asio::co_spawn(ctx,
+        [this, &reset_result]() -> awaitable<void> {
+            co_await DeleteKeys({"gojo:barrier:counter", "gojo:barrier:generation"});
+            reset_result.set_value();
+            co_return;
+        },
+        asio::detached);
+    reset_fut.get();
+
+    std::vector<Pointer<boost::redis::connection>> barrier_connections;
+    std::vector<Pointer<reactor::redis::RedisClient>> barrier_clients;
+    barrier_connections.reserve(expected_processes);
+    barrier_clients.reserve(expected_processes);
+
+    boost::redis::config cfg;
+    cfg.addr.host = "127.0.0.1";
+    cfg.addr.port = "6379";
+    cfg.database_index = 1;
+
+    for (std::size_t i = 0; i != expected_processes; ++i) {
+        auto barrier_conn = std::make_shared<boost::redis::connection>(ctx.get_executor());
+        barrier_conn->async_run(cfg, asio::detached);
+        barrier_clients.push_back(std::make_shared<reactor::redis::RedisClient>(barrier_conn));
+        barrier_connections.push_back(std::move(barrier_conn));
+    }
+
+    std::atomic<std::size_t> completed = 0;
+    std::promise<void> barrier_result;
+    auto barrier_fut = barrier_result.get_future();
+
+    for (std::size_t i = 0; i + 1 < expected_processes; ++i) {
+        asio::co_spawn(ctx,
+            [&, i]() -> awaitable<void> {
+                co_await barrier_clients[i]->Barrier(expected_processes);
+                if (completed.fetch_add(1) + 1 == expected_processes) {
+                    barrier_result.set_value();
+                }
+                co_return;
+            },
+            asio::detached);
+    }
+
+    ASSERT_EQ(barrier_fut.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+    ASSERT_EQ(completed.load(), 0u);
+
+    asio::co_spawn(ctx,
+        [&]() -> awaitable<void> {
+            co_await barrier_clients.back()->Barrier(expected_processes);
+            if (completed.fetch_add(1) + 1 == expected_processes) {
+                barrier_result.set_value();
+            }
+            co_return;
+        },
+        asio::detached);
+
+    ASSERT_EQ(barrier_fut.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+    ASSERT_EQ(completed.load(), expected_processes);
+
+    for (auto& barrier_conn : barrier_connections) {
+        barrier_conn->cancel();
+    }
 }

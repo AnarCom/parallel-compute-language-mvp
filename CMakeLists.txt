@@ -11,6 +11,7 @@ if(POLICY CMP0167)
 endif()
 
 add_subdirectory(runtime)
+add_subdirectory(examples)
 
 enable_testing()
 add_subdirectory(tests)
