@@ -1,0 +1,25 @@
+Я добавил в рантайм кэширование действий репозитория и атомарный коммит всего этого в Redis.
+
+доработал систему типов в runtime/reactor/src/type_system.cpp и type_system.hpp:
+сделал полную сериализацию для всех типов и объектов, поддержку хэширования для unordered_map,
+класс ChannelObjec для нормальной интеграции каналов с объектами, удобные методы доступа
+AsInt(), AsBool(), AsString() и операторы сравнения и вывода в поток
+
+Потом для распределённого рантайма написал четыре новых файла:  
+- execution_context.hpp и execution_context.cpp — класс ExecutionContext, который во время выполнения колбэка пишет все действия репозитория в thread-local переменную.  
+- execution_result.hpp и execution_result.cpp — класс ExecutionResult, неизменяемый слепок всех действий, готовый к коммиту в Redis.
+
+Дальше поправил repository.hpp и repository.cpp:  
+- RedisChannel теперь хранит временный ID и записывает Push в ExecutionContext.  
+- Методы NewChannel и RegisterJoinCase тоже записывают свои действия в контекст.  
+- RunByID создаёт ExecutionContext, выполняет runnable и вытаскивает результат.  
+- Добавил новый метод CommitExecutionResult, который атомарно сохраняет всё в Redis через RedisClient::CommitExecution.
+
+Схема работы теперь такая:  
+Вызывается RunByID → создаётся ExecutionContext и через RAII-гард ставится в thread-local
+→ выполняется колбэк, внутри него вызываются NewChannel, RegisterJoinCase, Push — все эти вызовы пишутся в контекст с временными ID каналов
+→ когда колбэк завершается, вызывается ExtractResult, который создаёт неизменяемый ExecutionResult
+→ гард автоматически убирает thread-local контекст
+→ потом CommitExecutionResult создаёт каналы в Redis, получает настоящие ID, строит маппинг временных ID на Redis ID, группирует сообщения по каналам и коммитит всё атомарно через RedisClient::CommitExecution одним Lua-скриптом.
+
+По потокобезопасности: всё на thread-local storage и атомарных операциях, так что безопасно. Все действия коммитятся или откатываются вместе, ошибки обрабатываются аккуратно, с логированием, и существующий код нигде не сломал.

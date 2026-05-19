@@ -3,6 +3,8 @@
 #include <runtime/reactor/common/logging.hpp>
 #include <runtime/reactor/distributed/config.hpp>
 #include <runtime/reactor/distributed/redis_client.hpp>
+#include "execution_context.hpp"
+#include "execution_result.hpp"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -153,10 +155,25 @@ RedisChannel::RedisChannel(ChannelMode mode, Type payload_type, uint64_t id) noe
     : ChannelBase(mode, std::move(payload_type)), id_(id) {}
 
 void RedisChannel::Push(const Object& message) {
-    RedisRepository::GetRepository().PushMessage(id_, message);
+    // Check if we're in execution context (for execution context system)
+    if (current_execution_context != nullptr) {
+        // Validate message type
+        if (!Accepts(message)) {
+            throw std::invalid_argument("Message type does not match channel payload type");
+        }
+        // Record push in context
+        current_execution_context->RecordPush(id_, message);
+    } else {
+        // Direct push to Redis (for distributed system)
+        RedisRepository::GetRepository().PushMessage(id_, message);
+    }
 }
+
 uint64_t RedisChannel::GetID() const noexcept {
-    // Should not be called from generated code. Maybe should not even be available in public interface
+    return id_;
+}
+
+uint64_t RedisChannel::GetTempID() const noexcept {
     return id_;
 }
 
@@ -166,6 +183,14 @@ RedisRepository& RedisRepository::GetRepository() {
 }
 
 void RedisRepository::RegisterJoinCase(Channels inputs, Objects context, uint64_t runnable_id) {
+    // Check if we're in execution context
+    if (current_execution_context != nullptr) {
+        // Record join case in execution context
+        current_execution_context->RecordJoinCase(inputs, context, runnable_id);
+        return;
+    }
+
+    // Otherwise, register directly in distributed system
     std::sort(
         inputs.begin(), inputs.end(),
         [](const ChannelPtr& left, const ChannelPtr& right) {
@@ -199,6 +224,13 @@ void RedisRepository::RegisterJoinCase(Channels inputs, Objects context, uint64_
 }
 
 Pointer<ChannelBase> RedisRepository::NewChannel(ChannelMode mode, Type payload_type) {
+    // Check if we're in execution context
+    if (current_execution_context != nullptr) {
+        // Record channel creation in execution context and return the proxy
+        return current_execution_context->RecordNewChannel(mode, payload_type);
+    }
+
+    // Otherwise, create channel directly in distributed system
     const auto channel_id = next_id_.fetch_add(1, std::memory_order_relaxed);
     RunRedisOperation([this, channel_id](redis::RedisClient& client) -> boost::asio::awaitable<void> {
         co_await client.NewChannel(ChannelKey(channel_id));
@@ -311,7 +343,12 @@ void RedisRepository::Stop() noexcept {
     ioc.stop();
 }
 
-RedisRepository::RedisRepository(): next_id_(0), is_complete_(false), calls_semaphore_(0) {}
+RedisRepository::RedisRepository()
+    : next_id_(0)
+    , is_complete_(false)
+    , calls_semaphore_(0)
+    , current_exec_queue_id_("default_exec_queue")
+{}
 
 boost::asio::awaitable<void> RedisRepository::ReceiveChannelNotifications(Pointer<std::promise<void>> subscribed) {
     boost::redis::request subscribe_req;
@@ -416,16 +453,57 @@ boost::asio::awaitable<void> RedisRepository::RunSchedulledCall() {
         }
 
         debug::runtime_assert(call.runnable != nullptr, "scheduled runnable pointer is nullptr");
-        call.runnable->operator()(std::move(call.inputs), std::move(call.context));
+        
+        // Execute runnable and get result (using execution context system)
+        ExecutionResult result;
+        try {
+            result = RunByID(call.runnable->GetID(), std::move(call.inputs), std::move(call.context));
+        } catch (const std::exception& e) {
+            debug::print("Execution failed for runnable " + 
+                        std::to_string(call.runnable->GetID()) + ": " + 
+                        std::string(e.what()));
+            // Continue to next call (don't crash the worker)
+            if (is_complete_.load()) {
+                co_return;
+            }
+            continue;
+        }
+        
+        // Commit result to Redis
+        try {
+            co_await CommitExecutionResult(result);
+        } catch (const std::exception& e) {
+            debug::print("Commit failed: " + std::string(e.what()));
+            // TODO: Implement retry logic or move to dead-letter queue
+        }
+        
         if (is_complete_.load()) {
             co_return;
         }
     }
 }
-RunResult RedisRepository::RunByID(uint64_t runnable_id, Objects inputs, Objects context) {
-    RunResult result;
-    // Run runnable
-    return result;
+
+ExecutionResult RedisRepository::RunByID(uint64_t runnable_id, Objects inputs, Objects context) {
+    // Find runnable
+    auto it = runnable_map_.find(runnable_id);
+    if (it == runnable_map_.end() || it->second == nullptr) {
+        throw std::runtime_error("Runnable not found: " + std::to_string(runnable_id));
+    }
+    
+    // Create execution context
+    ExecutionContext exec_context;
+    ExecutionContextGuard guard(&exec_context);
+    
+    // Execute runnable (will record actions in exec_context)
+    try {
+        it->second->operator()(inputs, context);
+    } catch (const std::exception& e) {
+        debug::print("Runnable execution failed: " + std::string(e.what()));
+        throw;
+    }
+    
+    // Extract and return result
+    return exec_context.ExtractResult();
 }
 
 boost::asio::awaitable<void> RedisRepository::TryScheduleReaction(const DistributedReaction& reaction) {
@@ -523,6 +601,74 @@ std::string RedisRepository::ChannelKey(uint64_t channel_id) const {
 
 std::string RedisRepository::ExecQueueKey(uint64_t runnable_id) const {
     return "exec:" + std::to_string(runnable_id);
+}
+
+// Execution context commit logic
+boost::asio::awaitable<void> RedisRepository::CommitExecutionResult(const ExecutionResult& result) {
+    // 1. Create channels in Redis and build ID mapping
+    std::unordered_map<uint64_t, std::string> temp_id_to_redis_id;
+    
+    for (const auto& channel_creation : result.GetChannels()) {
+        std::string redis_channel_id = GenerateRedisChannelID();
+        
+        try {
+            if (redis_client_) {
+                co_await redis_client_->NewChannel(redis_channel_id);
+            } else {
+                debug::print("Warning: redis_client_ not initialized, skipping channel creation");
+            }
+            temp_id_to_redis_id[channel_creation.temp_id] = redis_channel_id;
+        } catch (const std::exception& e) {
+            debug::print("Failed to create channel in Redis: " + std::string(e.what()));
+            throw;
+        }
+    }
+    
+    // 2. Register join-cases (if your system needs this)
+    // For now, skip this step - join-cases might be handled differently
+    // TODO: Implement join-case registration if needed
+    
+    // 3. Prepare channel messages map
+    std::map<std::string, Objects> channel_msgs_map;
+    try {
+        channel_msgs_map = result.PrepareChannelMessagesMap(temp_id_to_redis_id);
+    } catch (const std::exception& e) {
+        debug::print("Failed to prepare channel messages: " + std::string(e.what()));
+        throw;
+    }
+    
+    // 4. Commit all messages atomically
+    if (!channel_msgs_map.empty()) {
+        std::string exec_queue_id = GetCurrentExecQueueID();
+        
+        try {
+            if (redis_client_) {
+                co_await redis_client_->CommitExecution(exec_queue_id, channel_msgs_map);
+            } else {
+                debug::print("Warning: redis_client_ not initialized, skipping commit");
+            }
+        } catch (const std::exception& e) {
+            debug::print("Failed to commit execution to Redis: " + std::string(e.what()));
+            throw;
+        }
+    }
+    
+    // Log success
+    debug::print("Successfully committed execution result: " + 
+                std::to_string(result.GetChannelCount()) + " channels, " +
+                std::to_string(result.GetPushCount()) + " messages");
+}
+
+std::string RedisRepository::GenerateRedisChannelID() {
+    // Generate unique channel ID using atomic counter
+    uint64_t id = next_channel_id_.fetch_add(1, std::memory_order_relaxed);
+    // TODO: Use actual node ID instead of hardcoded "node1"
+    return "ch:node1:" + std::to_string(id);
+}
+
+std::string RedisRepository::GetCurrentExecQueueID() const {
+    // Return current execution queue ID
+    return current_exec_queue_id_;
 }
 
 }  // namespace reactor
