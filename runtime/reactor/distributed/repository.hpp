@@ -13,6 +13,7 @@
 #include <boost/asio.hpp>
 
 #include <runtime/reactor/common/interface.hpp>
+#include "execution_result.hpp"
 
 namespace boost::redis {
 class connection;
@@ -57,9 +58,6 @@ struct SchedulledCall {
     Runnable* runnable;
 };
 
-struct RunResult {
-    // TODO: This class contains changes that must be atomically commited
-};
 
 class RedisChannel : public ChannelBase {
 public:
@@ -67,6 +65,9 @@ public:
 
     void Push(const Object& message) override;
     uint64_t GetID() const noexcept override;
+
+    // Get temporary ID for this execution context
+    uint64_t GetTempID() const noexcept;
 
 private:
     uint64_t id_;
@@ -89,7 +90,7 @@ private:
     boost::asio::awaitable<void> ReceiveReactionNotifications();
     boost::asio::awaitable<void> ReceiveJoinCase();
     boost::asio::awaitable<void> RunSchedulledCall();
-    RunResult RunByID(uint64_t runnable_id, Objects inputs, Objects context);
+    ExecutionResult RunByID(uint64_t runnable_id, Objects inputs, Objects context);
     boost::asio::awaitable<void> TryScheduleReaction(const DistributedReaction& reaction);
     DistributedReactions GetReactionsDependentOnChannel(uint64_t channel_id);
     bool IsReactionAssignedToThisProcess(uint64_t reaction_id) const;
@@ -97,6 +98,11 @@ private:
     void ScheduleCall(Objects inputs, Objects context, uint64_t runnable_id) noexcept;
     std::string ChannelKey(uint64_t channel_id) const;
     std::string ExecQueueKey(uint64_t runnable_id) const;
+
+    // Execution context commit logic
+    boost::asio::awaitable<void> CommitExecutionResult(const ExecutionResult& result);
+    std::string GenerateRedisChannelID();
+    std::string GetCurrentExecQueueID() const;
 
     boost::asio::io_context ioc;
     Pointer<boost::redis::connection> conn_;
@@ -116,6 +122,10 @@ private:
 
     std::recursive_mutex lock_;
     std::counting_semaphore<max_schedulled_calls> calls_semaphore_;
+    
+    // For execution context system
+    std::atomic<uint64_t> next_channel_id_{0};
+    std::string current_exec_queue_id_;
 };
 
 }  // namespace reactor

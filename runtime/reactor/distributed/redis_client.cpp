@@ -77,7 +77,7 @@ awaitable<void> RedisClient::NewChannel(const std::string& channel_id) {
     req.push("EVAL", scripts::kNewChannelScript, "2", channel_id, node);
     response<bool> resp;
 
-    co_await conn_ptr_->async_exec(req, resp);
+    co_await conn_ptr_->async_exec(req, resp, boost::asio::deferred);
     co_return;
 }
 
@@ -110,7 +110,7 @@ awaitable<void> RedisClient::NewExecQueue(const std::string& exec_queue_id) {
     req.push("EVAL", scripts::kNewExecQueueScript, "2", exec_queue_id, node);
 
     response<bool> resp;
-    co_await conn_ptr_->async_exec(req, resp);
+    co_await conn_ptr_->async_exec(req, resp, boost::asio::deferred);
     co_return;
 }
 
@@ -158,7 +158,7 @@ awaitable<Objects> RedisClient::ScheduleExecution(
         req.push_range("EVAL", command);
         response<std::vector<std::string>> resp;
 
-        co_await conn_ptr_->async_exec(req, resp);
+        co_await conn_ptr_->async_exec(req, resp, boost::asio::deferred);
         raw_result = std::move(std::get<0>(resp).value());
     }
 
@@ -259,7 +259,7 @@ awaitable<KeyToAttrsMap> RedisClient::GetAttributes(const Keys& keys, const Attr
         req.push_range("EVAL", command);
         boost::redis::response<std::vector<std::string>> resp;
 
-        co_await conn_ptr_->async_exec(req, resp);
+        co_await conn_ptr_->async_exec(req, resp, boost::asio::deferred);
 
         raw_result = std::move(std::get<0>(resp).value());
     }
