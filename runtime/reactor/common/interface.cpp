@@ -1,9 +1,10 @@
 #include "interface.hpp"
+#include "lifecycle.hpp"
 
 namespace reactor {
 
 ChannelBase::ChannelBase(ChannelMode mode, Type payload_type)
-    : mode_(mode), payload_type_(std::move(payload_type)) {}
+    : mode_(mode), payload_type_(std::move(payload_type)), lifecycle_() {}
 
 ChannelBase::~ChannelBase() noexcept = default;
 
@@ -61,5 +62,38 @@ const Pointer<ChannelBase>& ChannelObject::channel() const noexcept {
 Runnable::~Runnable() noexcept = default;
 
 Repository::~Repository() noexcept = default;
+
+// ChannelBase lifecycle methods
+void ChannelBase::Close() noexcept {
+    lifecycle_.Close();
+}
+
+ChannelState ChannelBase::GetState() const noexcept {
+    return lifecycle_.GetState();
+}
+
+bool ChannelBase::CanAcceptMessages() const noexcept {
+    return lifecycle_.CanAcceptMessages();
+}
+
+bool ChannelBase::CanConsumeMessages() const noexcept {
+    return lifecycle_.CanConsumeMessages();
+}
+
+bool ChannelBase::IsActive() const noexcept {
+    return lifecycle_.IsActive();
+}
+
+bool ChannelBase::IsClosed() const noexcept {
+    return lifecycle_.IsClosed();
+}
+
+ChannelLifecycle& ChannelBase::GetLifecycle() noexcept {
+    return lifecycle_;
+}
+
+const ChannelLifecycle& ChannelBase::GetLifecycle() const noexcept {
+    return lifecycle_;
+}
 
 }  // namespace reactor

@@ -27,6 +27,20 @@ add_executable(ManualTestTypeSystem manual_test_type_system.cpp)
 target_link_libraries(ManualTestTypeSystem PRIVATE ParallelReactor ReactorCommon)
 add_test(NAME ManualTypeSystemTest COMMAND ManualTestTypeSystem)
 
+
+
+
+add_executable(TestImprovedRepositoryIntegration test_improved_repository_integration.cpp)
+target_link_libraries(TestImprovedRepositoryIntegration
+    PRIVATE
+    GTest::GTest
+    GTest::Main
+    ParallelImprovedReactor
+    ReactorCommon
+    Threads::Threads
+)
+add_test(NAME TestImprovedRepositoryIntegration COMMAND TestImprovedRepositoryIntegration)
+
 # -------------------------------------------------------------------
 # Runtime reactor tests (commented out - test files not yet created)
 # -------------------------------------------------------------------

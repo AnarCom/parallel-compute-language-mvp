@@ -105,15 +105,27 @@ ChannelReference::ChannelReference(ChannelMode mode, Type payload_type, uint64_t
     : ChannelBase(mode, std::move(payload_type)), channel_data_(std::make_shared<ChannelData>(id)) {}
 
 ChannelReference::~ChannelReference() noexcept {
+    GetLifecycle().OnLastReferenceDropped();
 }
 
 void ChannelReference::Push(const Object& message) {
+    if (!CanAcceptMessages()) {
+        debug::runtime_assert(false, "Cannot push to closed/closing channel");
+        return;
+    }
+    
     auto channel_lock_guard = channel_data_->Guard();
 
     {
         auto queue_lock_guard = channel_data_->queue_.Guard();
         auto was_empty = channel_data_->queue_.Empty();
         channel_data_->queue_.Push(message);
+        
+        auto& repo = ImprovedRepository::GetRepository();
+        if (repo.GetEventEmitter()->IsEnabled()) {
+            repo.GetEventEmitter()->EmitMessageSent(channel_data_->id_, mode(), payload_type(), message);
+        }
+        
         if (!was_empty) {
             return;
         }
@@ -128,6 +140,21 @@ void ChannelReference::Push(const Object& message) {
         }
 
         if (!any_empty) {
+            auto& repo = ImprovedRepository::GetRepository();
+            if (repo.GetEventEmitter()->IsEnabled()) {
+                IDs channel_ids;
+                for (auto& input : reaction->inputs_) {
+                    channel_ids.push_back(input->id_);
+                }
+                Match match{
+                    .match_id = IDGenerator::Instance().NextMatchID(),
+                    .join_case_id = reaction->runnable_id_,
+                    .input_channel_ids = channel_ids,
+                    .detected_at = std::chrono::steady_clock::now()
+                };
+                repo.GetEventEmitter()->EmitMatchDetected(match);
+            }
+            
             Objects input_objects;
             input_objects.reserve(reaction->inputs_.size());
             for (auto& input : reaction->inputs_) {
@@ -173,13 +200,36 @@ void ImprovedRepository::RegisterJoinCase(Channels channels, Objects context, ui
     }
 
     std::for_each(channels_data.begin(), channels_data.end(), [](auto data){ data->Unlock(); });
+
+    if (event_emitter_->IsEnabled()) {
+        uint64_t join_case_id = next_join_case_id_.fetch_add(1, std::memory_order_relaxed);
+        IDs channel_ids;
+        channel_ids.reserve(channels.size());
+        for (const auto& ch : channels) {
+            channel_ids.push_back(ch->GetID());
+        }
+        event_emitter_->EmitJoinCaseRegistered(join_case_id, channel_ids);
+    }
 }
 
 ChannelPtr ImprovedRepository::NewChannel(ChannelMode mode, Type payload_type) {
-    return std::make_shared<ChannelReference>(mode, payload_type, next_id.fetch_add(1, std::memory_order_relaxed));
+    uint64_t channel_id = next_id.fetch_add(1, std::memory_order_relaxed);
+    
+    auto channel = std::make_shared<ChannelReference>(mode, payload_type, channel_id);
+    
+    if (event_emitter_->IsEnabled()) {
+        event_emitter_->EmitChannelCreated(channel_id, mode, payload_type);
+    }
+    
+    return channel;
 }
 
 void ImprovedRepository::Run(uint64_t main_runnable_id, std::unordered_map<uint64_t, Runnable*> runnable_map) {
+    lifecycle_.Start();
+    if (event_emitter_->IsEnabled()) {
+        event_emitter_->EmitRepositoryStarted();
+    }
+
     runnable_map_ = std::move(runnable_map);
     auto main_runnable_it = runnable_map_.find(main_runnable_id);
 
@@ -203,19 +253,98 @@ void ImprovedRepository::Run(uint64_t main_runnable_id, std::unordered_map<uint6
     for (auto& runner_thread : runner_threads) {
         runner_thread.join();
     }
+
+    lifecycle_.MarkCompleted();
+    if (event_emitter_->IsEnabled()) {
+        event_emitter_->EmitRepositoryCompleted();
+    }
 }
 
-ImprovedRepository::ImprovedRepository() : next_id(0), is_complete(false) {}
+ImprovedRepository::ImprovedRepository()
+    : next_id(0),
+      next_join_case_id_(0),
+      is_complete(false),
+      lifecycle_(),
+      event_emitter_(std::make_shared<EventEmitter>()),
+      error_handler_(ErrorPolicy::IsolateReaction) {}
 
 void ImprovedRepository::RunRoutine(size_t thread_index, std::shared_ptr<CallQueueNode> node) noexcept {
     write_iterator = CallQueueWriteIterator{.node = node};
-    auto read_iterator = CallQueueReadIterator{.node = node}; 
+    auto read_iterator = CallQueueReadIterator{.node = node};
     while (true) {
+        if (is_complete.load() || lifecycle_.ShouldTerminate()) {
+            break;
+        }
+        
         auto [call_batch_ptr, batch_size] = read_iterator.GetNextCall();
         for (size_t i = 0; i < batch_size; ++i) {
             auto call = call_batch_ptr + i;
             call->lock.acquire();
-            call->runnable->operator()(call->inputs, call->context);
+            
+            auto started_at = std::chrono::steady_clock::now();
+            uint64_t reaction_id = IDGenerator::Instance().NextReactionID();
+            
+            try {
+                if (event_emitter_->IsEnabled()) {
+                    event_emitter_->EmitReactionStarted(reaction_id, 0);
+                }
+                
+                call->runnable->operator()(call->inputs, call->context);
+                
+                auto completed_at = std::chrono::steady_clock::now();
+                
+                if (event_emitter_->IsEnabled()) {
+                    ExecutionResult result{
+                        .reaction_id = reaction_id,
+                        .status = ExecutionStatus::Success,
+                        .error_message = {},
+                        .exception = {},
+                        .started_at = started_at,
+                        .completed_at = completed_at,
+                        .duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            completed_at - started_at)
+                    };
+                    event_emitter_->EmitReactionCompleted(result);
+                }
+                
+            } catch (...) {
+                std::exception_ptr exception = std::current_exception();
+                auto completed_at = std::chrono::steady_clock::now();
+                
+                ExecutionResult result{
+                    .reaction_id = reaction_id,
+                    .status = ExecutionStatus::Failed,
+                    .error_message = {},
+                    .exception = exception,
+                    .started_at = started_at,
+                    .completed_at = completed_at,
+                    .duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        completed_at - started_at)
+                };
+                
+                try {
+                    std::rethrow_exception(exception);
+                } catch (const std::exception& e) {
+                    result.error_message = e.what();
+                } catch (...) {
+                    result.error_message = "Unknown exception";
+                }
+                
+                if (event_emitter_->IsEnabled()) {
+                    event_emitter_->EmitReactionFailed(result);
+                }
+                
+                ErrorPolicy policy = error_handler_.GetPolicy();
+                if (policy == ErrorPolicy::FailFast) {
+                    // For FailFast, we need to create a ScheduledReaction to pass to HandleReactionError
+                    // For now, just trigger shutdown without storing
+                    Shutdown();
+                    break;
+                } else {
+                    // Isolate error and continue
+                    // Error is already logged via event system
+                }
+            }
         }
     }
 }
@@ -223,6 +352,56 @@ void ImprovedRepository::RunRoutine(size_t thread_index, std::shared_ptr<CallQue
 void ImprovedRepository::ScheduleCall(Objects inputs, Objects context, uint64_t runnable_id) noexcept {
     auto runnable = runnable_map_[runnable_id];
     write_iterator.ScheduleCall(inputs, context, runnable);
+}
+
+void ChannelReference::NotifyQueueEmpty() noexcept {
+    GetLifecycle().OnQueueEmpty();
+}
+
+void ChannelReference::NotifyLastReference() noexcept {
+    GetLifecycle().OnLastReferenceDropped();
+}
+
+void ImprovedRepository::Shutdown() noexcept {
+    lifecycle_.BeginShutdown();
+    is_complete.store(true);
+    if (event_emitter_->IsEnabled()) {
+        event_emitter_->EmitRepositoryShuttingDown();
+    }
+}
+
+void ImprovedRepository::WaitForCompletion() noexcept {
+    while (!lifecycle_.ShouldTerminate()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+RepositoryState ImprovedRepository::GetState() const noexcept {
+    return lifecycle_.GetState();
+}
+
+bool ImprovedRepository::IsRunning() const noexcept {
+    return lifecycle_.IsRunning();
+}
+
+void ImprovedRepository::SetEventLogger(Pointer<EventLogger> logger) {
+    event_emitter_->SetLogger(logger);
+}
+
+Pointer<EventLogger> ImprovedRepository::GetEventLogger() const {
+    return event_emitter_->GetLogger();
+}
+
+Pointer<EventEmitter> ImprovedRepository::GetEventEmitter() const {
+    return event_emitter_;
+}
+
+ErrorHandler& ImprovedRepository::GetErrorHandler() {
+    return error_handler_;
+}
+
+const ErrorHandler& ImprovedRepository::GetErrorHandler() const {
+    return error_handler_;
 }
 
 }  // namespace reactor
