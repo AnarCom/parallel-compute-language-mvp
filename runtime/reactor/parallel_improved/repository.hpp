@@ -10,6 +10,10 @@
 
 #include <runtime/reactor/common/helpers.hpp>
 #include <runtime/reactor/common/interface.hpp>
+#include <runtime/reactor/common/lifecycle.hpp>
+#include <runtime/reactor/common/firing.hpp>
+#include <runtime/reactor/common/event_emitter.hpp>
+#include <runtime/reactor/common/error_handler.hpp>
 
 namespace reactor {
 
@@ -119,16 +123,31 @@ struct ChannelReference: public ChannelBase {
     void Push(const Object& message) override;
     uint64_t GetID() const noexcept override;
 
+    void NotifyQueueEmpty() noexcept;
+    void NotifyLastReference() noexcept;
+
     ChannelDataPointer channel_data_;
 };
 
 class ImprovedRepository : public Repository, public Lockable {
 public:
-    ImprovedRepository();   
+    ImprovedRepository();
     static ImprovedRepository& GetRepository();
     void RegisterJoinCase(Channels inputs, Objects context, uint64_t runnable_id) override;
     Pointer<ChannelBase> NewChannel(ChannelMode mode = ChannelMode::Async, Type payload_type = Type::Unit()) override;
     void Run(uint64_t main_runnable_id, std::unordered_map<uint64_t, Runnable*> runnable_map) override;
+
+    void Shutdown() noexcept;
+    void WaitForCompletion() noexcept;
+    RepositoryState GetState() const noexcept;
+    bool IsRunning() const noexcept;
+
+    void SetEventLogger(Pointer<EventLogger> logger);
+    Pointer<EventLogger> GetEventLogger() const;
+    Pointer<EventEmitter> GetEventEmitter() const;
+
+    ErrorHandler& GetErrorHandler();
+    const ErrorHandler& GetErrorHandler() const;
 
 private:
     using QueuesMap = std::map<uint64_t, QueuePointer>;
@@ -137,9 +156,14 @@ private:
     void ScheduleCall(Objects inputs, Objects context, uint64_t runnable_id) noexcept;
 
     std::atomic_uint64_t next_id;
+    std::atomic_uint64_t next_join_case_id_;
 
     std::atomic<bool> is_complete;
     std::unordered_map<uint64_t, Runnable*> runnable_map_;
+
+    RepositoryLifecycle lifecycle_;
+    Pointer<EventEmitter> event_emitter_;
+    ErrorHandler error_handler_;
 
     friend struct ChannelReference;
 };

@@ -5,6 +5,7 @@
 
 #include "helpers.hpp"
 #include "type_system.hpp"
+#include "lifecycle.hpp"
 
 namespace reactor {
 
@@ -29,9 +30,22 @@ public:
     std::string ToString() const override;
     std::string Serialize() const override;
 
+    // Lifecycle methods
+    void Close() noexcept;
+    ChannelState GetState() const noexcept;
+    bool CanAcceptMessages() const noexcept;
+    bool CanConsumeMessages() const noexcept;
+    bool IsActive() const noexcept;
+    bool IsClosed() const noexcept;
+
+protected:
+    ChannelLifecycle& GetLifecycle() noexcept;
+    const ChannelLifecycle& GetLifecycle() const noexcept;
+
 private:
     ChannelMode mode_;
     Type payload_type_;
+    ChannelLifecycle lifecycle_;
 };
 
 using Channels = std::vector<ChannelPtr>;
