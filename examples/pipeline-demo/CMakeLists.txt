@@ -1,0 +1,2 @@
+add_executable(PipelineDemo main.cpp)
+target_link_libraries(PipelineDemo PRIVATE ParallelImprovedReactor)
