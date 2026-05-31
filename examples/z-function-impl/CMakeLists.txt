@@ -1,0 +1,2 @@
+add_executable(ZFunction main.cpp)
+target_link_libraries(ZFunction PRIVATE ParallelImprovedReactor)

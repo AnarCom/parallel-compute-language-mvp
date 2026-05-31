@@ -1,0 +1,2 @@
+add_executable(JsonValidator main.cpp)
+target_link_libraries(JsonValidator PRIVATE ParallelImprovedReactor)

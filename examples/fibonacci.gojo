@@ -1,0 +1,15 @@
+var Prev  async int
+var Cur async int
+const N = 123
+
+join from Prev as prev from Cur as cur {
+    if cur < N {
+        Prev <- prev + cur
+        Cur <- cur + 1
+    } else {
+        Print(prev)
+    }
+}
+
+Prev <- 0
+Cur  <- 0

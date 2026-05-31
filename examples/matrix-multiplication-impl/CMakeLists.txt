@@ -1,0 +1,2 @@
+add_executable(MatrixMultiplication main.cpp)
+target_link_libraries(MatrixMultiplication PRIVATE ParallelImprovedReactor)

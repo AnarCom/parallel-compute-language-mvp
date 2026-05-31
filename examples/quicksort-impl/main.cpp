@@ -11,7 +11,7 @@
 
 constexpr auto GetRepo = &reactor::ImprovedRepository::GetRepository;
 constexpr size_t MaxRand = 1'000'000'000;
-constexpr size_t SortSize = 10'000;
+constexpr size_t SortSize = 1000'000;
 
 static std::mutex lock;
 static std::chrono::time_point<std::chrono::steady_clock> start;
@@ -203,7 +203,7 @@ void QuicksortStl() {
 
 int main() {
     QuicksortBaseline();
-    // QuicksortStl();
+    QuicksortStl();
 
     std::unordered_map<uint64_t, reactor::Runnable*> runnable_map = {
         {0, new Split()},

@@ -17,7 +17,11 @@
 
 namespace reactor {
 
-constexpr std::ptrdiff_t max_runner_threads = 8;
+#ifndef REACTOR_MAX_RUNNER_THREADS
+#define REACTOR_MAX_RUNNER_THREADS 8
+#endif
+
+constexpr std::ptrdiff_t max_runner_threads = REACTOR_MAX_RUNNER_THREADS;
 constexpr size_t calls_queue_node_size = 4096;
 constexpr size_t calls_queue_batch_size = 4;
 constexpr size_t calls_queue_batch_threshold = 16;
