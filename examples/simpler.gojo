@@ -1,7 +1,7 @@
-var Log async string    // Создание канала
+var Log async string
 
-join from Log as msg {  // Создание реакции
+join from Log as msg {
     Print(msg)
 }
 
-Log <- "Hello world!"   // Отправка сообщения в реакцию
+Log <- "Hello world!"

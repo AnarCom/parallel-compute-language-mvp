@@ -1,2 +1,5 @@
 add_subdirectory(quicksort-impl)
 add_subdirectory(pipeline-demo)
+add_subdirectory(json-validator-impl)
+add_subdirectory(z-function-impl)
+add_subdirectory(matrix-multiplication-impl)

@@ -2,3 +2,4 @@ add_library(ParallelImprovedReactor repository.cpp)
 
 target_include_directories(ParallelImprovedReactor PUBLIC ${CMAKE_SOURCE_DIR} PRIVATE .)
 target_link_libraries(ParallelImprovedReactor PUBLIC ReactorCommon)
+target_compile_definitions(ParallelImprovedReactor PUBLIC REACTOR_MAX_RUNNER_THREADS=${REACTOR_MAX_RUNNER_THREADS})
