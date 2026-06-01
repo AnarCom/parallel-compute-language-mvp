@@ -20,6 +20,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -51,14 +52,25 @@ uint64_t HashKey(std::string_view key) noexcept {
     return hash;
 }
 
-uint64_t PickNodeByConsistentHash(uint64_t reaction_id, uint64_t programs_count) {
+constexpr auto kHeartbeatTTL = std::chrono::seconds(3);
+constexpr auto kHeartbeatRefreshInterval = std::chrono::seconds(1);
+constexpr auto kHeartbeatMonitorInterval = std::chrono::seconds(1);
+
+uint64_t PickNodeByConsistentHash(
+    uint64_t reaction_id,
+    uint64_t programs_count,
+    const std::unordered_set<uint64_t>& excluded_nodes = {}) {
     debug::runtime_assert(programs_count > 0, "consistent hash ring cannot be empty");
 
     std::vector<std::pair<uint64_t, uint64_t>> ring;
     ring.reserve(programs_count);
     for (uint64_t node_id = 0; node_id != programs_count; ++node_id) {
+        if (excluded_nodes.contains(node_id)) {
+            continue;
+        }
         ring.emplace_back(HashKey("node:" + std::to_string(node_id)), node_id);
     }
+    debug::runtime_assert(!ring.empty(), "consistent hash ring cannot contain only failed nodes");
     std::sort(ring.begin(), ring.end());
 
     const auto reaction_hash = HashKey("reaction:" + std::to_string(reaction_id));
@@ -119,6 +131,29 @@ std::optional<uint64_t> ParseChannelID(const std::string& channel_id) {
     } catch (std::exception&) {
         return {};
     }
+}
+
+DistributedReaction ReactionFromMetadata(const redis::ReactionMetadata& metadata) {
+    auto runnable_id = ParseChannelID(metadata.reaction_id);
+    if (!runnable_id.has_value()) {
+        throw std::runtime_error("reaction id is not numeric: " + metadata.reaction_id);
+    }
+
+    IDs input_ids;
+    input_ids.reserve(metadata.input_channel_ids.size());
+    for (const auto& input_channel_id : metadata.input_channel_ids) {
+        auto input_id = ParseChannelID(input_channel_id);
+        if (!input_id.has_value()) {
+            throw std::runtime_error("reaction input channel id is not numeric: " + input_channel_id);
+        }
+        input_ids.push_back(*input_id);
+    }
+
+    return DistributedReaction{
+        .input_ids = std::move(input_ids),
+        .context = metadata.context,
+        .runnable_id = *runnable_id,
+    };
 }
 
 template <typename Operation>
@@ -211,14 +246,20 @@ void RedisRepository::RegisterJoinCase(Channels inputs, Objects context, uint64_
     };
 
     if (IsReactionAssignedToThisProcess(runnable_id)) {
-        auto guard = std::lock_guard(lock_);
-        for (const auto channel_id : input_ids) {
-            dependent_reactions_[channel_id].push_back(reaction);
-        }
+        RegisterReactionLocally(reaction);
     }
 
-    RunRedisOperation([this, runnable_id](redis::RedisClient& client) -> boost::asio::awaitable<void> {
-        co_await client.RegisterReaction(std::to_string(runnable_id), ExecQueueKey(runnable_id));
+    RunRedisOperation([this, input_ids, reaction](redis::RedisClient& client) -> boost::asio::awaitable<void> {
+        std::vector<std::string> input_channel_ids;
+        input_channel_ids.reserve(input_ids.size());
+        for (const auto input_id : input_ids) {
+            input_channel_ids.push_back(ChannelKey(input_id));
+        }
+        co_await client.RegisterReaction(
+            std::to_string(reaction.runnable_id),
+            ExecQueueKey(reaction.runnable_id),
+            input_channel_ids,
+            reaction.context);
         co_return;
     });
 }
@@ -255,6 +296,7 @@ void RedisRepository::Run(uint64_t main_runnable_id, std::unordered_map<uint64_t
         calls_.clear();
         dependent_reactions_.clear();
         reaction_attributes_.clear();
+        dead_nodes_.clear();
     }
     ioc.restart();
 
@@ -296,11 +338,19 @@ void RedisRepository::Run(uint64_t main_runnable_id, std::unordered_map<uint64_t
     reaction_command_conn_ = std::make_shared<boost::redis::connection>(ioc.get_executor());
     reaction_redis_client_ = std::make_shared<redis::RedisClient>(reaction_command_conn_);
     reaction_command_conn_->async_run(MakeBoostRedisConfig(*config), boost::asio::detached);
+    heartbeat_conn_ = std::make_shared<boost::redis::connection>(ioc.get_executor());
+    heartbeat_redis_client_ = std::make_shared<redis::RedisClient>(heartbeat_conn_);
+    heartbeat_conn_->async_run(MakeBoostRedisConfig(*config), boost::asio::detached);
+    fault_monitor_conn_ = std::make_shared<boost::redis::connection>(ioc.get_executor());
+    fault_monitor_redis_client_ = std::make_shared<redis::RedisClient>(fault_monitor_conn_);
+    fault_monitor_conn_->async_run(MakeBoostRedisConfig(*config), boost::asio::detached);
 
     auto channel_subscribed = std::make_shared<std::promise<void>>();
     auto channel_subscribed_done = channel_subscribed->get_future();
     boost::asio::co_spawn(ioc.get_executor(), RedisRepository::ReceiveChannelNotifications(channel_subscribed), boost::asio::detached);
     boost::asio::co_spawn(ioc.get_executor(), RedisRepository::ReceiveReactionNotifications(), boost::asio::detached);
+    boost::asio::co_spawn(ioc.get_executor(), RedisRepository::RefreshHeartbeat(), boost::asio::detached);
+    boost::asio::co_spawn(ioc.get_executor(), RedisRepository::MonitorHeartbeats(), boost::asio::detached);
     boost::asio::co_spawn(ioc.get_executor(), RedisRepository::ReceiveJoinCase(), boost::asio::detached);
     boost::asio::co_spawn(ioc.get_executor(), RedisRepository::RunSchedulledCall(), boost::asio::detached);
 
@@ -338,6 +388,12 @@ void RedisRepository::Stop() noexcept {
     }
     if (reaction_command_conn_) {
         reaction_command_conn_->cancel();
+    }
+    if (heartbeat_conn_) {
+        heartbeat_conn_->cancel();
+    }
+    if (fault_monitor_conn_) {
+        fault_monitor_conn_->cancel();
     }
     calls_semaphore_.release();
     ioc.stop();
@@ -402,6 +458,11 @@ boost::asio::awaitable<void> RedisRepository::ReceiveReactionNotifications() {
                 continue;
             }
 
+            auto metadata = co_await reaction_redis_client_->GetReactionMetadata(*reaction_key);
+            if (!metadata.input_channel_ids.empty()) {
+                RegisterReactionLocally(ReactionFromMetadata(metadata));
+            }
+
             auto attrs = co_await reaction_redis_client_->GetAttributes(
                 {ExecQueueKey(*reaction_id)},
                 {"head", "tail"});
@@ -427,6 +488,71 @@ boost::asio::awaitable<void> RedisRepository::ReceiveReactionNotifications() {
             throw boost::system::system_error(ec);
         }
     }
+}
+
+boost::asio::awaitable<void> RedisRepository::RefreshHeartbeat() {
+    auto config = GetConfig();
+    auto executor = co_await boost::asio::this_coro::executor;
+    boost::asio::steady_timer timer(executor);
+
+    while (!is_complete_.load()) {
+        co_await heartbeat_redis_client_->RefreshProcessHeartbeat(config->NodeID, kHeartbeatTTL);
+
+        timer.expires_after(kHeartbeatRefreshInterval);
+        boost::system::error_code ec;
+        co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+        if (ec) {
+            co_return;
+        }
+    }
+
+    co_return;
+}
+
+boost::asio::awaitable<void> RedisRepository::MonitorHeartbeats() {
+    auto config = GetConfig();
+    auto executor = co_await boost::asio::this_coro::executor;
+    boost::asio::steady_timer timer(executor);
+
+    timer.expires_after(kHeartbeatTTL);
+    boost::system::error_code initial_ec;
+    co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, initial_ec));
+    if (initial_ec) {
+        co_return;
+    }
+
+    while (!is_complete_.load()) {
+        for (uint64_t node_id = 0; node_id != config->ProgramsCount; ++node_id) {
+            if (node_id == config->NodeID) {
+                continue;
+            }
+
+            {
+                auto guard = std::lock_guard(lock_);
+                if (dead_nodes_.contains(node_id)) {
+                    continue;
+                }
+            }
+
+            const auto is_alive = co_await fault_monitor_redis_client_->IsProcessHeartbeatAlive(node_id);
+            if (!is_alive) {
+                {
+                    auto guard = std::lock_guard(lock_);
+                    dead_nodes_.insert(node_id);
+                }
+                co_await RecoverReactionsForDeadNode(node_id);
+            }
+        }
+
+        timer.expires_after(kHeartbeatMonitorInterval);
+        boost::system::error_code ec;
+        co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+        if (ec) {
+            co_return;
+        }
+    }
+
+    co_return;
 }
 
 boost::asio::awaitable<void> RedisRepository::ReceiveJoinCase() {
@@ -550,12 +676,74 @@ DistributedReactions RedisRepository::GetReactionsDependentOnChannel(uint64_t ch
     return reactions_it->second;
 }
 
-bool RedisRepository::IsReactionAssignedToThisProcess(uint64_t reaction_id) const {
+bool RedisRepository::IsReactionAssignedToThisProcess(uint64_t reaction_id) {
     auto config = GetConfig();
     debug::runtime_assert(
         config->NodeID < config->ProgramsCount,
         "NODE_ID must be less than PROGRAMS_COUNT");
-    return PickNodeByConsistentHash(reaction_id, config->ProgramsCount) == config->NodeID;
+
+    std::unordered_set<uint64_t> dead_nodes;
+    {
+        auto guard = std::lock_guard(lock_);
+        dead_nodes = dead_nodes_;
+    }
+    return PickNodeByConsistentHash(reaction_id, config->ProgramsCount, dead_nodes) == config->NodeID;
+}
+
+bool RedisRepository::WasReactionAssignedToNode(uint64_t reaction_id, uint64_t node_id) const {
+    auto config = GetConfig();
+    return PickNodeByConsistentHash(reaction_id, config->ProgramsCount) == node_id;
+}
+
+bool RedisRepository::IsReactionAssignedToThisProcessAfterFault(uint64_t reaction_id, uint64_t dead_node_id) {
+    auto config = GetConfig();
+    std::unordered_set<uint64_t> dead_nodes;
+    {
+        auto guard = std::lock_guard(lock_);
+        dead_nodes = dead_nodes_;
+    }
+    dead_nodes.insert(dead_node_id);
+    return PickNodeByConsistentHash(reaction_id, config->ProgramsCount, dead_nodes) == config->NodeID;
+}
+
+void RedisRepository::RegisterReactionLocally(DistributedReaction reaction) {
+    auto guard = std::lock_guard(lock_);
+    for (const auto channel_id : reaction.input_ids) {
+        auto& reactions = dependent_reactions_[channel_id];
+        const auto already_registered = std::any_of(
+            reactions.begin(),
+            reactions.end(),
+            [runnable_id = reaction.runnable_id](const DistributedReaction& existing) {
+                return existing.runnable_id == runnable_id;
+            });
+        if (!already_registered) {
+            reactions.push_back(reaction);
+        }
+    }
+}
+
+boost::asio::awaitable<void> RedisRepository::RecoverReactionsForDeadNode(uint64_t dead_node_id) {
+    auto reaction_ids = co_await fault_monitor_redis_client_->ListReactions();
+
+    for (const auto& reaction_key : reaction_ids) {
+        auto reaction_id = ParseChannelID(reaction_key);
+        if (!reaction_id.has_value()) {
+            continue;
+        }
+        if (!WasReactionAssignedToNode(*reaction_id, dead_node_id)) {
+            continue;
+        }
+        if (!IsReactionAssignedToThisProcessAfterFault(*reaction_id, dead_node_id)) {
+            continue;
+        }
+
+        auto metadata = co_await fault_monitor_redis_client_->GetReactionMetadata(reaction_key);
+        auto reaction = ReactionFromMetadata(metadata);
+        RegisterReactionLocally(reaction);
+        co_await TryScheduleReaction(reaction);
+    }
+
+    co_return;
 }
 
 void RedisRepository::PushMessage(uint64_t channel_id, const Object& message) {
@@ -612,11 +800,10 @@ boost::asio::awaitable<void> RedisRepository::CommitExecutionResult(const Execut
         std::string redis_channel_id = GenerateRedisChannelID();
         
         try {
-            if (redis_client_) {
-                co_await redis_client_->NewChannel(redis_channel_id);
-            } else {
-                debug::print("Warning: redis_client_ not initialized, skipping channel creation");
-            }
+            RunRedisOperation([redis_channel_id](redis::RedisClient& client) -> boost::asio::awaitable<void> {
+                co_await client.NewChannel(redis_channel_id);
+                co_return;
+            });
             temp_id_to_redis_id[channel_creation.temp_id] = redis_channel_id;
         } catch (const std::exception& e) {
             debug::print("Failed to create channel in Redis: " + std::string(e.what()));
@@ -624,32 +811,72 @@ boost::asio::awaitable<void> RedisRepository::CommitExecutionResult(const Execut
         }
     }
     
-    // 2. Register join-cases (if your system needs this)
-    // For now, skip this step - join-cases might be handled differently
-    // TODO: Implement join-case registration if needed
-    
-    // 3. Prepare channel messages map
-    std::map<std::string, Objects> channel_msgs_map;
-    try {
-        channel_msgs_map = result.PrepareChannelMessagesMap(temp_id_to_redis_id);
-    } catch (const std::exception& e) {
-        debug::print("Failed to prepare channel messages: " + std::string(e.what()));
-        throw;
-    }
-    
-    // 4. Commit all messages atomically
-    if (!channel_msgs_map.empty()) {
-        std::string exec_queue_id = GetCurrentExecQueueID();
-        
-        try {
-            if (redis_client_) {
-                co_await redis_client_->CommitExecution(exec_queue_id, channel_msgs_map);
-            } else {
-                debug::print("Warning: redis_client_ not initialized, skipping commit");
+    // 2. Register join-cases created by this execution.
+    for (const auto& join_case : result.GetJoinCases()) {
+        IDs input_ids;
+        std::vector<std::string> input_channel_ids;
+        input_ids.reserve(join_case.input_channel_temp_ids.size());
+        input_channel_ids.reserve(join_case.input_channel_temp_ids.size());
+
+        for (const auto temp_id : join_case.input_channel_temp_ids) {
+            const auto redis_id_it = temp_id_to_redis_id.find(temp_id);
+            if (redis_id_it == temp_id_to_redis_id.end()) {
+                throw std::logic_error("join-case references unknown temporary channel");
             }
-        } catch (const std::exception& e) {
-            debug::print("Failed to commit execution to Redis: " + std::string(e.what()));
-            throw;
+            input_channel_ids.push_back(redis_id_it->second);
+            auto parsed_id = ParseChannelID(redis_id_it->second);
+            if (!parsed_id.has_value()) {
+                throw std::logic_error("generated Redis channel id is not numeric");
+            }
+            input_ids.push_back(*parsed_id);
+        }
+
+        auto reaction = DistributedReaction{
+            .input_ids = input_ids,
+            .context = join_case.context,
+            .runnable_id = join_case.runnable_id,
+        };
+        if (IsReactionAssignedToThisProcess(join_case.runnable_id)) {
+            RegisterReactionLocally(reaction);
+        }
+        RunRedisOperation([this, input_channel_ids, join_case](redis::RedisClient& client) -> boost::asio::awaitable<void> {
+            co_await client.RegisterReaction(
+                std::to_string(join_case.runnable_id),
+                ExecQueueKey(join_case.runnable_id),
+                input_channel_ids,
+                join_case.context);
+            co_return;
+        });
+    }
+
+    // 3. Push recorded messages. The Redis schedule script remains the single-consumer guard.
+    for (const auto& push : result.GetPushes()) {
+        const auto redis_id_it = temp_id_to_redis_id.find(push.channel_temp_id);
+        if (redis_id_it == temp_id_to_redis_id.end()) {
+            throw std::logic_error("message push references unknown temporary channel");
+        }
+        RunRedisOperation([channel_id = redis_id_it->second, message = push.message](redis::RedisClient& client) -> boost::asio::awaitable<void> {
+            co_await client.PushToChannel(channel_id, message);
+            co_return;
+        });
+
+        auto parsed_channel_id = ParseChannelID(redis_id_it->second);
+        if (parsed_channel_id.has_value()) {
+            for (const auto& reaction : GetReactionsDependentOnChannel(*parsed_channel_id)) {
+                Objects inputs;
+                RunRedisOperation([this, &reaction, &inputs](redis::RedisClient& client) -> boost::asio::awaitable<void> {
+                    redis::Keys channel_keys;
+                    channel_keys.reserve(reaction.input_ids.size());
+                    for (const auto input_id : reaction.input_ids) {
+                        channel_keys.push_back(ChannelKey(input_id));
+                    }
+                    inputs = co_await client.ScheduleExecution(ExecQueueKey(reaction.runnable_id), channel_keys);
+                    co_return;
+                });
+                if (!inputs.empty()) {
+                    ScheduleCall(std::move(inputs), reaction.context, reaction.runnable_id);
+                }
+            }
         }
     }
     
@@ -657,13 +884,11 @@ boost::asio::awaitable<void> RedisRepository::CommitExecutionResult(const Execut
     debug::print("Successfully committed execution result: " + 
                 std::to_string(result.GetChannelCount()) + " channels, " +
                 std::to_string(result.GetPushCount()) + " messages");
+    co_return;
 }
 
 std::string RedisRepository::GenerateRedisChannelID() {
-    // Generate unique channel ID using atomic counter
-    uint64_t id = next_channel_id_.fetch_add(1, std::memory_order_relaxed);
-    // TODO: Use actual node ID instead of hardcoded "node1"
-    return "ch:node1:" + std::to_string(id);
+    return std::to_string(next_id_.fetch_add(1, std::memory_order_relaxed));
 }
 
 std::string RedisRepository::GetCurrentExecQueueID() const {

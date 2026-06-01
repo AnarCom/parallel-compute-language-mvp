@@ -8,6 +8,7 @@
 #include <mutex>
 #include <queue>
 #include <semaphore>
+#include <unordered_set>
 #include <unordered_map>
 
 #include <boost/asio.hpp>
@@ -88,12 +89,18 @@ private:
     RedisRepository();
     boost::asio::awaitable<void> ReceiveChannelNotifications(Pointer<std::promise<void>> subscribed);
     boost::asio::awaitable<void> ReceiveReactionNotifications();
+    boost::asio::awaitable<void> RefreshHeartbeat();
+    boost::asio::awaitable<void> MonitorHeartbeats();
     boost::asio::awaitable<void> ReceiveJoinCase();
     boost::asio::awaitable<void> RunSchedulledCall();
     ExecutionResult RunByID(uint64_t runnable_id, Objects inputs, Objects context);
     boost::asio::awaitable<void> TryScheduleReaction(const DistributedReaction& reaction);
     DistributedReactions GetReactionsDependentOnChannel(uint64_t channel_id);
-    bool IsReactionAssignedToThisProcess(uint64_t reaction_id) const;
+    bool IsReactionAssignedToThisProcess(uint64_t reaction_id);
+    bool WasReactionAssignedToNode(uint64_t reaction_id, uint64_t node_id) const;
+    bool IsReactionAssignedToThisProcessAfterFault(uint64_t reaction_id, uint64_t dead_node_id);
+    void RegisterReactionLocally(DistributedReaction reaction);
+    boost::asio::awaitable<void> RecoverReactionsForDeadNode(uint64_t dead_node_id);
 
     void ScheduleCall(Objects inputs, Objects context, uint64_t runnable_id) noexcept;
     std::string ChannelKey(uint64_t channel_id) const;
@@ -111,10 +118,15 @@ private:
     Pointer<boost::redis::connection> reaction_conn_;
     Pointer<boost::redis::connection> reaction_command_conn_;
     Pointer<redis::RedisClient> reaction_redis_client_;
+    Pointer<boost::redis::connection> heartbeat_conn_;
+    Pointer<redis::RedisClient> heartbeat_redis_client_;
+    Pointer<boost::redis::connection> fault_monitor_conn_;
+    Pointer<redis::RedisClient> fault_monitor_redis_client_;
 
     std::list<JoinCase> cases_;
     std::unordered_map<uint64_t, DistributedReactions> dependent_reactions_;
     std::deque<ReactionAttributes> reaction_attributes_;
+    std::unordered_set<uint64_t> dead_nodes_;
     std::deque<SchedulledCall> calls_;
     std::unordered_map<uint64_t, Runnable*> runnable_map_;
     std::atomic_uint64_t next_id_;

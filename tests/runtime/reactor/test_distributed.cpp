@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include <runtime/reactor/distributed/repository.hpp>
+#include <runtime/reactor/distributed/redis_client.hpp>
 
 namespace {
 
@@ -90,7 +91,9 @@ public:
         EXPECT_TRUE(inputs.empty());
         EXPECT_TRUE(context.empty());
 
-        auto channel = reactor::RedisRepository::GetRepository().NewChannel();
+        auto channel = reactor::RedisRepository::GetRepository().NewChannel(
+            reactor::ChannelMode::Async,
+            reactor::Type::String());
         reactor::RedisRepository::GetRepository().RegisterJoinCase({channel}, {}, 1);
         channel->Push(reactor::Object::String("payload"));
     }
@@ -98,6 +101,29 @@ public:
     uint64_t GetID() const noexcept override {
         return 0;
     }
+};
+
+class CrashAfterBarrier : public reactor::Runnable {
+public:
+    explicit CrashAfterBarrier(std::string crash_marker_path) noexcept
+        : crash_marker_path_(std::move(crash_marker_path)) {}
+
+    void operator()(reactor::Objects inputs, reactor::Objects context) override {
+        EXPECT_TRUE(inputs.empty());
+        EXPECT_TRUE(context.empty());
+
+        auto marker = std::ofstream(crash_marker_path_, std::ios::app);
+        marker << "crashed\n";
+        marker.close();
+        std::_Exit(0);
+    }
+
+    uint64_t GetID() const noexcept override {
+        return 0;
+    }
+
+private:
+    std::string crash_marker_path_;
 };
 
 void ConfigureDistributedTestEnv(uint64_t programs_count, uint64_t node_id, uint64_t redis_db) {
@@ -140,6 +166,42 @@ void FlushRedisDB(uint64_t redis_db) {
 
     ioc.run();
     done.get();
+}
+
+template <typename Operation>
+void RunRedisTestOperation(uint64_t redis_db, Operation&& operation) {
+    boost::asio::io_context ioc;
+    auto conn = std::make_shared<boost::redis::connection>(ioc.get_executor());
+    auto client = std::make_shared<reactor::redis::RedisClient>(conn);
+    auto result = std::promise<void>{};
+    auto done = result.get_future();
+
+    conn->async_run(MakeRedisTestConfig(redis_db), boost::asio::detached);
+    boost::asio::co_spawn(
+        ioc.get_executor(),
+        [conn, client, operation = std::forward<Operation>(operation), &result]() mutable -> boost::asio::awaitable<void> {
+            try {
+                co_await operation(*client);
+                result.set_value();
+            } catch (...) {
+                result.set_exception(std::current_exception());
+            }
+            conn->cancel();
+            co_return;
+        },
+        boost::asio::detached);
+
+    ioc.run();
+    done.get();
+}
+
+void CreateReadyFaultReaction(uint64_t redis_db) {
+    RunRedisTestOperation(redis_db, [](reactor::redis::RedisClient& client) -> boost::asio::awaitable<void> {
+        co_await client.NewChannel("0");
+        co_await client.RegisterReaction("1", "exec:1", {"0"}, {});
+        co_await client.PushToChannel("0", reactor::Object::String("payload"));
+        co_return;
+    });
 }
 
 std::optional<std::string> GetRedisString(uint64_t redis_db, const std::string& key) {
@@ -185,12 +247,21 @@ void WaitForRedisString(uint64_t redis_db, const std::string& key, const std::st
     FAIL() << "Timed out waiting for Redis key " << key << " to become " << expected;
 }
 
-pid_t SpawnDistributedChild(uint64_t node_id, const std::filesystem::path& marker_path) {
+pid_t SpawnDistributedChild(
+    uint64_t node_id,
+    uint64_t redis_db,
+    const std::filesystem::path& marker_path,
+    const std::string& mode = "normal",
+    const std::filesystem::path& crash_marker_path = {}) {
     const auto pid = fork();
     if (pid == 0) {
-        ConfigureDistributedTestEnv(2, node_id, 2);
+        ConfigureDistributedTestEnv(2, node_id, redis_db);
         setenv("DISTRIBUTED_REPOSITORY_CHILD", "1", 1);
+        setenv("DISTRIBUTED_REPOSITORY_CHILD_MODE", mode.c_str(), 1);
         setenv("DISTRIBUTED_REPOSITORY_MARKER", marker_path.c_str(), 1);
+        if (!crash_marker_path.empty()) {
+            setenv("DISTRIBUTED_REPOSITORY_CRASH_MARKER", crash_marker_path.c_str(), 1);
+        }
         execl(
             g_executable_path.c_str(),
             g_executable_path.c_str(),
@@ -241,7 +312,7 @@ std::size_t CountMarkerLines(const std::filesystem::path& marker_path) {
 }
 
 std::size_t WaitForAtLeastOneMarkerLine(const std::filesystem::path& marker_path) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     auto executions = CountMarkerLines(marker_path);
     while (executions == 0 && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -249,6 +320,10 @@ std::size_t WaitForAtLeastOneMarkerLine(const std::filesystem::path& marker_path
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     return CountMarkerLines(marker_path);
+}
+
+bool WaitForMarkerLine(const std::filesystem::path& marker_path) {
+    return WaitForAtLeastOneMarkerLine(marker_path) != 0;
 }
 
 std::filesystem::path MakeMarkerPath(std::string label) {
@@ -351,21 +426,25 @@ TEST(DistributedRepository, MultiProcessChildRunsRepository) {
 
     const auto* marker_path = std::getenv("DISTRIBUTED_REPOSITORY_MARKER");
     ASSERT_NE(marker_path, nullptr);
+    const auto* mode_env = std::getenv("DISTRIBUTED_REPOSITORY_CHILD_MODE");
+    const auto mode = mode_env == nullptr ? std::string("normal") : std::string(mode_env);
+    const auto* crash_marker_path = std::getenv("DISTRIBUTED_REPOSITORY_CRASH_MARKER");
 
     std::promise<void> dependent_called;
     auto dependent_future = dependent_called.get_future();
     auto main = MainRegistersReaction();
+    auto crashing_main = CrashAfterBarrier(crash_marker_path == nullptr ? "" : crash_marker_path);
     auto dependent = DependentRunnable(dependent_called, marker_path);
 
     std::unordered_map<uint64_t, reactor::Runnable*> runnable_map;
-    runnable_map.emplace(0, &main);
+    runnable_map.emplace(0, mode == "fault_crasher" ? static_cast<reactor::Runnable*>(&crashing_main) : static_cast<reactor::Runnable*>(&main));
     runnable_map.emplace(1, &dependent);
 
     auto run_thread = std::thread([&]() {
         reactor::RedisRepository::GetRepository().Run(0, std::move(runnable_map));
     });
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (
         dependent_future.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready &&
         std::chrono::steady_clock::now() < deadline &&
@@ -381,15 +460,13 @@ TEST(DistributedRepository, MultiProcessRunsReactionOnce) {
     constexpr auto redis_db = 2u;
     FlushRedisDB(redis_db);
 
-    const auto marker_path =
-        std::filesystem::temp_directory_path() /
-        ("gojo-distributed-reaction-" + std::to_string(getpid()) + ".txt");
+    const auto marker_path = MakeMarkerPath("reaction");
     std::filesystem::remove(marker_path);
 
-    const auto first_child = SpawnDistributedChild(0, marker_path);
+    const auto first_child = SpawnDistributedChild(0, redis_db, marker_path);
     ASSERT_GT(first_child, 0);
     WaitForRedisString(redis_db, "gojo:barrier:counter", "1");
-    const auto second_child = SpawnDistributedChild(1, marker_path);
+    const auto second_child = SpawnDistributedChild(1, redis_db, marker_path);
     ASSERT_GT(second_child, 0);
 
     auto executions = WaitForAtLeastOneMarkerLine(marker_path);
@@ -400,6 +477,38 @@ TEST(DistributedRepository, MultiProcessRunsReactionOnce) {
     EXPECT_EQ(executions, 1u);
 
     std::filesystem::remove(marker_path);
+}
+
+TEST(DistributedRepository, MultiProcessTakesOverDeadProcessReactionOnce) {
+    constexpr auto redis_db = 3u;
+    FlushRedisDB(redis_db);
+
+    const auto execution_marker_path = MakeMarkerPath("fault-execution");
+    const auto crash_marker_path = MakeMarkerPath("fault-crash");
+    std::filesystem::remove(execution_marker_path);
+    std::filesystem::remove(crash_marker_path);
+    CreateReadyFaultReaction(redis_db);
+
+    const auto survivor_child = SpawnDistributedChild(0, redis_db, execution_marker_path, "fault_survivor");
+    ASSERT_GT(survivor_child, 0);
+    WaitForRedisString(redis_db, "gojo:barrier:counter", "1");
+
+    const auto crashing_child = SpawnDistributedChild(
+        1,
+        redis_db,
+        execution_marker_path,
+        "fault_crasher",
+        crash_marker_path);
+    ASSERT_GT(crashing_child, 0);
+
+    ASSERT_TRUE(WaitForMarkerLine(crash_marker_path));
+    EXPECT_EQ(WaitForAtLeastOneMarkerLine(execution_marker_path), 1u);
+
+    StopChild(survivor_child);
+    StopChild(crashing_child);
+
+    std::filesystem::remove(execution_marker_path);
+    std::filesystem::remove(crash_marker_path);
 }
 
 int main(int argc, char** argv) {
