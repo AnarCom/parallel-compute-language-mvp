@@ -9,8 +9,13 @@
 
 #include <iostream>
 #include <atomic>
+#include <algorithm>
+#include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <stdexcept>
+#include <sstream>
+#include <unordered_map>
 #include <vector>
 
 namespace reactor::redis {
@@ -34,6 +39,9 @@ inline std::string GenNode(const std::string& base) {
 constexpr auto kBarrierCounterKey = "gojo:barrier:counter";
 constexpr auto kBarrierGenerationKey = "gojo:barrier:generation";
 constexpr auto kBarrierChannel = "gojo:barrier:release";
+constexpr auto kReactionsSetKey = "gojo:reactions";
+constexpr auto kReactionKeyPrefix = "gojo:reaction:";
+constexpr auto kHeartbeatKeyPrefix = "gojo:heartbeat:";
 constexpr auto kBarrierArriveScript = R"(
 local count = redis.call('INCR', KEYS[1])
 if count == tonumber(ARGV[1]) then
@@ -63,6 +71,55 @@ bool ConsumeUntilBarrierRelease(boost::redis::generic_response& resp, std::size_
     }
 
     return false;
+}
+
+std::string JoinStrings(const std::vector<std::string>& values, char separator) {
+    std::string result;
+    for (std::size_t i = 0; i != values.size(); ++i) {
+        if (i != 0) {
+            result.push_back(separator);
+        }
+        result += values[i];
+    }
+    return result;
+}
+
+std::vector<std::string> SplitString(const std::string& value, char separator) {
+    std::vector<std::string> result;
+    if (value.empty()) {
+        return result;
+    }
+
+    std::size_t start = 0;
+    while (start <= value.size()) {
+        const auto end = value.find(separator, start);
+        if (end == std::string::npos) {
+            result.push_back(value.substr(start));
+            break;
+        }
+        result.push_back(value.substr(start, end - start));
+        start = end + 1;
+    }
+    return result;
+}
+
+std::string ReactionKey(const std::string& reaction_id) {
+    return std::string(kReactionKeyPrefix) + reaction_id;
+}
+
+std::string HeartbeatKey(uint64_t node_id) {
+    return std::string(kHeartbeatKeyPrefix) + std::to_string(node_id);
+}
+
+std::size_t ParseSize(const std::string& value) {
+    std::size_t result = 0;
+    const auto* begin = value.data();
+    const auto* end = value.data() + value.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, result);
+    if (ec != std::errc{} || ptr != end) {
+        throw std::runtime_error("invalid numeric Redis metadata value: " + value);
+    }
+    return result;
 }
 
 } // namespace
@@ -115,13 +172,112 @@ awaitable<void> RedisClient::NewExecQueue(const std::string& exec_queue_id) {
 }
 
 awaitable<void> RedisClient::RegisterReaction(const std::string& reaction_id, const std::string& exec_queue_id) {
+    co_await RegisterReaction(reaction_id, exec_queue_id, {}, {});
+    co_return;
+}
+
+awaitable<void> RedisClient::RegisterReaction(
+    const std::string& reaction_id,
+    const std::string& exec_queue_id,
+    const std::vector<std::string>& input_channel_ids,
+    const Objects& context) {
     co_await NewExecQueue(exec_queue_id);
+
+    request metadata_req;
+    metadata_req.push("HSET", ReactionKey(reaction_id),
+        "exec_queue", exec_queue_id,
+        "inputs", JoinStrings(input_channel_ids, ','),
+        "context_count", std::to_string(context.size()));
+    response<std::int64_t> metadata_resp;
+    co_await conn_ptr_->async_exec(metadata_req, metadata_resp);
+
+    if (!context.empty()) {
+        request context_req;
+        context_req.push("HSET", ReactionKey(reaction_id));
+        for (std::size_t i = 0; i != context.size(); ++i) {
+            context_req.push("context:" + std::to_string(i), context[i].Serialize());
+        }
+        response<std::int64_t> context_resp;
+        co_await conn_ptr_->async_exec(context_req, context_resp);
+    }
+
+    request set_req;
+    set_req.push("SADD", kReactionsSetKey, reaction_id);
+    response<std::int64_t> set_resp;
+    co_await conn_ptr_->async_exec(set_req, set_resp);
 
     request notify_req;
     notify_req.push("PUBLISH", kReactionCreatedNotification, reaction_id);
     response<std::int64_t> notify_resp;
     co_await conn_ptr_->async_exec(notify_req, notify_resp);
 
+    co_return;
+}
+
+awaitable<std::vector<std::string>> RedisClient::ListReactions() {
+    request req;
+    req.push("SMEMBERS", kReactionsSetKey);
+    response<std::vector<std::string>> resp;
+    co_await conn_ptr_->async_exec(req, resp);
+    co_return std::move(std::get<0>(resp).value());
+}
+
+awaitable<ReactionMetadata> RedisClient::GetReactionMetadata(const std::string& reaction_id) {
+    request req;
+    req.push("HGETALL", ReactionKey(reaction_id));
+    response<std::vector<std::string>> resp;
+    co_await conn_ptr_->async_exec(req, resp);
+
+    std::unordered_map<std::string, std::string> values;
+    const auto& raw = std::get<0>(resp).value();
+    for (std::size_t i = 0; i + 1 < raw.size(); i += 2) {
+        values.emplace(raw[i], raw[i + 1]);
+    }
+
+    ReactionMetadata metadata;
+    metadata.reaction_id = reaction_id;
+    if (auto exec_queue = values.find("exec_queue"); exec_queue != values.end()) {
+        metadata.exec_queue_id = exec_queue->second;
+    }
+    if (auto inputs = values.find("inputs"); inputs != values.end()) {
+        metadata.input_channel_ids = SplitString(inputs->second, ',');
+    }
+
+    const auto context_count_it = values.find("context_count");
+    const auto context_count = context_count_it == values.end() ? 0 : ParseSize(context_count_it->second);
+    metadata.context.reserve(context_count);
+    for (std::size_t i = 0; i != context_count; ++i) {
+        const auto context_it = values.find("context:" + std::to_string(i));
+        if (context_it == values.end()) {
+            throw std::runtime_error("reaction metadata is missing context entry");
+        }
+        metadata.context.push_back(Object::Deserialize(context_it->second));
+    }
+
+    co_return metadata;
+}
+
+awaitable<void> RedisClient::RefreshProcessHeartbeat(uint64_t node_id, std::chrono::seconds ttl) {
+    request req;
+    req.push("SET", HeartbeatKey(node_id), "alive", "EX", std::to_string(ttl.count()));
+    response<std::string> resp;
+    co_await conn_ptr_->async_exec(req, resp);
+    co_return;
+}
+
+awaitable<bool> RedisClient::IsProcessHeartbeatAlive(uint64_t node_id) {
+    request req;
+    req.push("EXISTS", HeartbeatKey(node_id));
+    response<std::int64_t> resp;
+    co_await conn_ptr_->async_exec(req, resp);
+    co_return std::get<0>(resp).value() != 0;
+}
+
+awaitable<void> RedisClient::ClearProcessHeartbeat(uint64_t node_id) {
+    request req;
+    req.push("DEL", HeartbeatKey(node_id));
+    response<std::int64_t> resp;
+    co_await conn_ptr_->async_exec(req, resp);
     co_return;
 }
 
