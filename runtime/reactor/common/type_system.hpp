@@ -31,6 +31,7 @@ enum class TypeKind {
     Bool,
     String,
     Tuple,
+    Struct,
     List,
     Channel,
     Algebraic,
@@ -43,6 +44,7 @@ enum class ObjectKind {
     Bool,
     String,
     Tuple,
+    Struct,
     List,
     Algebraic,
     Channel,
@@ -53,6 +55,7 @@ class TypeNode;
 class PrimitiveTypeNode;
 class VariableTypeNode;
 class TupleTypeNode;
+class StructTypeNode;
 class ListTypeNode;
 class ChannelTypeNode;
 class AlgebraicTypeNode;
@@ -69,6 +72,7 @@ public:
     static Type String();
     static Type Variable(std::string name);
     static Type Tuple(std::vector<Type> elements);
+    static Type Struct(const std::string& name, std::vector<std::pair<std::string, Type>> fields);
     static Type List(Type element_type);
     static Type Channel(ChannelMode mode, Type payload_type);
     static Type SyncChannel(Type payload_type);
@@ -80,6 +84,8 @@ public:
     [[nodiscard]] std::string ToString() const;
 
     [[nodiscard]] const std::vector<Type>& TupleElements() const;
+    [[nodiscard]] const std::string& StructName() const;
+    [[nodiscard]] const std::vector<std::pair<std::string, Type>>& StructFields() const;
     [[nodiscard]] const Type& ListElementType() const;
     [[nodiscard]] ChannelMode GetChannelMode() const;
     [[nodiscard]] const Type& ChannelPayloadType() const;
@@ -163,6 +169,25 @@ public:
 
 private:
     std::vector<Type> elements_;
+};
+
+class StructTypeNode final : public TypeNode {
+public:
+    explicit StructTypeNode(std::string name, std::vector<std::pair<std::string, Type>> fields) noexcept;
+
+    TypeKind kind() const noexcept override;
+    bool Equals(const TypeNode& other) const noexcept override;
+    std::string ToString() const override;
+    bool IsConcrete() const noexcept override;
+    size_t Hash() const noexcept override;
+    std::string Serialize() const override;
+
+    const std::string& name() const noexcept;
+    const std::vector<std::pair<std::string, Type>>& fields() const noexcept;
+
+private:
+    std::string name_;
+    std::vector<std::pair<std::string, Type>> fields_;
 };
 
 class ListTypeNode final : public TypeNode {
@@ -299,6 +324,24 @@ private:
     Objects elements_;
 };
 
+class StructObject final : public ObjectValue {
+public:
+    StructObject(const detail::StructTypeNode& type, const Objects& fields) noexcept;
+
+    ObjectKind kind() const noexcept override;
+    Type GetType() const override;
+    std::string ToString() const override;
+    std::string Serialize() const override;
+
+    const std::string& name() const noexcept;
+    const Objects& fields() const noexcept;
+    const Type& field_type(const std::string& name) const;
+    ObjectValue& field_value(const std::string& name) const;
+private:
+    detail::StructTypeNode type_;
+    Objects fields_;
+};
+
 class ListObject final : public ObjectValue {
 public:
     ListObject(Objects elements, Maybe<Type> declared_element_type = {}) noexcept;
@@ -366,6 +409,7 @@ public:
     static Object Bool(bool value);
     static Object String(std::string value);
     static Object Tuple(Objects elements);
+    static Object Struct(const detail::StructTypeNode&, const Objects& fields);
     static Object List(Objects elements, Maybe<Type> declared_element_type = {});
     static Object Algebraic(Type algebraic_type, std::string constructor_name, Objects fields = {});
     static Object Channel(Pointer<ChannelBase> channel);

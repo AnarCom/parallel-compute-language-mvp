@@ -33,6 +33,8 @@ public:
 
     virtual std::any visitExpressionList(TParser::ExpressionListContext *context) = 0;
 
+    virtual std::any visitTypeDecl(TParser::TypeDeclContext *context) = 0;
+
     virtual std::any visitTypeSpec(TParser::TypeSpecContext *context) = 0;
 
     virtual std::any visitAliasDecl(TParser::AliasDeclContext *context) = 0;
@@ -113,6 +115,8 @@ public:
 
     virtual std::any visitElementType(TParser::ElementTypeContext *context) = 0;
 
+    virtual std::any visitSliceType(TParser::SliceTypeContext *context) = 0;
+
     virtual std::any visitAsyncChannelType(TParser::AsyncChannelTypeContext *context) = 0;
 
     virtual std::any visitSyncChannelType(TParser::SyncChannelTypeContext *context) = 0;
@@ -143,6 +147,8 @@ public:
 
     virtual std::any visitOperandName(TParser::OperandNameContext *context) = 0;
 
+    virtual std::any visitQualifiedIdent(TParser::QualifiedIdentContext *context) = 0;
+
     virtual std::any visitCompositeLit(TParser::CompositeLitContext *context) = 0;
 
     virtual std::any visitLiteralType(TParser::LiteralTypeContext *context) = 0;
@@ -157,11 +163,19 @@ public:
 
     virtual std::any visitElement(TParser::ElementContext *context) = 0;
 
+    virtual std::any visitStructType(TParser::StructTypeContext *context) = 0;
+
+    virtual std::any visitFieldDecl(TParser::FieldDeclContext *context) = 0;
+
     virtual std::any visitString_(TParser::String_Context *context) = 0;
+
+    virtual std::any visitEmbeddedField(TParser::EmbeddedFieldContext *context) = 0;
 
     virtual std::any visitFunctionLit(TParser::FunctionLitContext *context) = 0;
 
     virtual std::any visitIndex(TParser::IndexContext *context) = 0;
+
+    virtual std::any visitSlice_(TParser::Slice_Context *context) = 0;
 
     virtual std::any visitArguments(TParser::ArgumentsContext *context) = 0;
 

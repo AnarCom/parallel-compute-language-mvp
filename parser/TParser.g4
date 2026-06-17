@@ -97,7 +97,7 @@ importPath
 
 declaration
     : constDecl
-    //| typeDecl
+    | typeDecl
     | varDecl
     ;
 
@@ -116,10 +116,10 @@ identifierList
 expressionList
     : expression (COMMA expression)*
     ;
-/*
+
 typeDecl
     : TYPE (typeSpec | L_PAREN (typeSpec eos)* R_PAREN)
-    ;*/
+    ;
 
 typeSpec
     : aliasDecl
@@ -169,7 +169,7 @@ varDecl
     ;
 
 varSpec
-    : identifierList (type_ (ASSIGN expressionList)? | ASSIGN expressionList)
+    : identifierList (type_ (ASSIGN expressionList)?) // | ASSIGN expressionList not supported yet (without type)
     ;
 
 block
@@ -376,13 +376,13 @@ typeArgs
     ;
 
 typeName
-    //: qualifiedIdent
-    : IDENTIFIER
+    : qualifiedIdent
+    | IDENTIFIER
     ;
 
 typeLit
     : arrayType
-    //| structType
+    | structType
     //| pointerType
     | functionType
     //| interfaceType
@@ -393,7 +393,7 @@ typeLit
     ;
 
 arrayType
-    : L_BRACKET arrayLength R_BRACKET elementType
+    : L_BRACKET arrayLength? R_BRACKET elementType
     ;
 
 arrayLength
@@ -410,12 +410,12 @@ pointerType
 
 interfaceType
     : INTERFACE L_CURLY ((methodSpec | typeElement) eos)* R_CURLY
-    ;
-
+    ;*/
+/*
 sliceType
     : L_BRACKET R_BRACKET elementType
-    ;
-
+    ;*/
+/*
 // It's possible to replace `type` with more restricted typeLit list and also pay attention to nil maps
 mapType
     : MAP L_BRACKET type_ R_BRACKET elementType
@@ -462,7 +462,7 @@ parameterDecl
 expression
     : primaryExpr
     | unary_op = (PLUS | MINUS | EXCLAMATION | CARET | STAR | AMPERSAND /*| RECEIVE*/) expression
-    | expression EMIT expression
+    | expression EMIT expression // For Sync channels
     | expression mul_op = (STAR | DIV | MOD | LSHIFT | RSHIFT | AMPERSAND | BIT_CLEAR) expression
     | expression add_op = (PLUS | MINUS | OR | CARET) expression
     | expression rel_op = (
@@ -482,7 +482,11 @@ primaryExpr
     /*( {this->isOperand()}? operand
     | {this->isConversion()}? conversion
     | {this.isMethodExpr()}? methodExpr )*/
-    ( /*DOT IDENTIFIER* | index | /*slice_ | typeAssertion |*/ arguments )*
+    op = operation*
+    ;
+
+operation
+    : ( DOT IDENTIFIER* | index | slice_ | /*typeAssertion |*/ arguments )
     ;
 
 conversion
@@ -519,20 +523,20 @@ integer
 
 operandName
     : IDENTIFIER
-   // | qualifiedIdent
+    | qualifiedIdent
     ;
-/*
+
 qualifiedIdent
     : IDENTIFIER DOT IDENTIFIER
-    ;*/
+    ;
 
 compositeLit
     : literalType literalValue
     ;
 
 literalType
-    //: structType
-    : arrayType
+    : structType
+    | arrayType
     //| L_BRACKET ELLIPSIS R_BRACKET elementType
     //| sliceType
     //| mapType
@@ -560,23 +564,23 @@ element
     : expression
     | literalValue
     ;
-/*
+
 structType
     : STRUCT L_CURLY (fieldDecl eos)* R_CURLY
     ;
 
 fieldDecl
     : (identifierList type_ | embeddedField) tag = string_?
-    ;*/
+    ;
 
 string_
     : RAW_STRING_LIT
     | INTERPRETED_STRING_LIT
     ;
-/*
+
 embeddedField
     : STAR? typeName typeArgs?
-    ;*/
+    ;
 
 functionLit
     : FUNC signature block
@@ -585,10 +589,10 @@ functionLit
 index
     : L_BRACKET expression R_BRACKET
     ;
-/*
+
 slice_
     : L_BRACKET (expression? COLON expression? | expression? COLON expression COLON expression) R_BRACKET
-    ;*/
+    ;
 /*
 typeAssertion
     : DOT L_PAREN type_ R_PAREN

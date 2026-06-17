@@ -183,6 +183,61 @@ const std::vector<Type>& TupleTypeNode::elements() const noexcept {
     return elements_;
 }
 
+StructTypeNode::StructTypeNode(std::string name, std::vector<std::pair<std::string, Type>> fields) noexcept
+    : name_(std::move(name)), fields_(std::move(fields)) {}
+
+TypeKind StructTypeNode::kind() const noexcept {
+    return TypeKind::Struct;
+}
+
+bool StructTypeNode::Equals(const TypeNode& other) const noexcept {
+    auto* rhs = dynamic_cast<const StructTypeNode*>(&other);
+    return rhs != nullptr && rhs->name_ == name_ && rhs->fields_ == fields_;
+}
+
+std::string StructTypeNode::ToString() const {
+    std::vector<std::string> parts;
+    parts.reserve(fields_.size());
+    for (const auto& field : fields_) {
+        parts.push_back(field.first + ": " + field.second.ToString());
+    }
+    return "{" + name_ + ";" + JoinStrings(parts, ", ") + "}";
+}
+
+bool StructTypeNode::IsConcrete() const noexcept {
+    for (const auto& field : fields_) {
+        if (!field.second.IsConcrete()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+size_t StructTypeNode::Hash() const noexcept {
+    size_t h = std::hash<int>{}(static_cast<int>(TypeKind::Struct));
+    for (const auto& field : fields_) {
+        h = HashCombine(h, field.second.Hash());
+    }
+    return h;
+}
+
+std::string StructTypeNode::Serialize() const {
+    std::vector<std::string> parts;
+    parts.reserve(fields_.size());
+    for (const auto& field : fields_) {
+        parts.push_back(field.first + ": " + field.second.Serialize());
+    }
+    return "{" + name_ + ";" + JoinStrings(parts, ",") + "}";
+}
+
+const std::string& StructTypeNode::name() const noexcept {
+    return name_;
+}
+
+const std::vector<std::pair<std::string, Type>>& StructTypeNode::fields() const noexcept {
+    return fields_;
+}
+
 ListTypeNode::ListTypeNode(Type element_type) noexcept : element_type_(std::move(element_type)) {}
 
 TypeKind ListTypeNode::kind() const noexcept {
@@ -350,6 +405,10 @@ Type Type::Tuple(std::vector<Type> elements) {
     return Type(std::make_shared<detail::TupleTypeNode>(std::move(elements)));
 }
 
+Type Type::Struct(const std::string& name, std::vector<std::pair<std::string, Type>> fields) {
+    return Type(std::make_shared<detail::StructTypeNode>(name, std::move(fields)));
+}
+
 Type Type::List(Type element_type) {
     return Type(std::make_shared<detail::ListTypeNode>(std::move(element_type)));
 }
@@ -384,6 +443,14 @@ std::string Type::ToString() const {
 
 const std::vector<Type>& Type::TupleElements() const {
     return RequireNode<detail::TupleTypeNode>(*this).elements();
+}
+
+const std::string& Type::StructName() const {
+    return RequireNode<detail::StructTypeNode>(*this).name();
+}
+
+const std::vector<std::pair<std::string, Type>>& Type::StructFields() const {
+    return RequireNode<detail::StructTypeNode>(*this).fields();
 }
 
 const Type& Type::ListElementType() const {
@@ -461,6 +528,28 @@ Type Type::Deserialize(const std::string& serialized) {
             elements.push_back(Deserialize(inner.substr(start)));
         }
         return Type::Tuple(std::move(elements));
+    }
+
+    // Handle struct types {name;field1:T1,field2:T2,...}
+    if (serialized[0] == '{' && serialized.back() == '}') {
+        std::string inner = serialized.substr(1, serialized.size() - 2);
+        std::vector<std::pair<std::string, Type>> fields;
+        std::string name = inner.substr(0, inner.find(';'));
+        inner = inner.substr(name.size() + 1);
+        size_t depth = 0;
+        size_t start = 0;
+        for (size_t i = 0; i < inner.size(); ++i) {
+            if (inner[i] == '(' || inner[i] == '[' || inner[i] == '<') ++depth;
+            if (inner[i] == ')' || inner[i] == ']' || inner[i] == '>') --depth;
+            if (depth == 0 && inner[i] == ';') {
+                fields.push_back(std::make_pair(inner.substr(start, i - start), Deserialize(inner.substr(i + 1))));
+                start = i + 1;
+            }
+        }
+        if (start < inner.size()) {
+            fields.push_back(std::make_pair(inner.substr(start), Deserialize(inner.substr(start))));
+        }
+        return Type::Struct(name, fields);
     }
 
     // Handle channel types channel<mode,payload>
@@ -641,6 +730,36 @@ const Objects& TupleObject::elements() const noexcept {
     return elements_;
 }
 
+StructObject::StructObject(const detail::StructTypeNode& type, const Objects& fields) noexcept
+    : type_(type), fields_(fields) {}
+
+ObjectKind StructObject::kind() const noexcept {
+    return ObjectKind::Struct;
+}
+
+Type StructObject::GetType() const {
+    return Type::Struct(type_.name(), type_.fields());
+}
+
+std::string StructObject::ToString() const {
+    std::vector<std::string> parts;
+    parts.reserve(fields_.size());
+    for (const auto& field : fields_) {
+        parts.push_back(field.ToString());
+    }
+    return "{" + JoinStrings(parts, ", ") + "}";
+}
+
+std::string StructObject::Serialize() const {
+    std::vector<std::string> parts;
+    parts.reserve(fields_.size());
+    for (const auto& field : fields_) {
+        parts.push_back(field.Serialize());
+    }
+    return "struct:" + type_.name() + ":{" + JoinStrings(parts, ",") + "}";
+}
+
+
 ListObject::ListObject(Objects elements, Maybe<Type> declared_element_type) noexcept
     : elements_(std::move(elements)), element_type_(InferElementType(elements_, declared_element_type)) {}
 
@@ -771,6 +890,10 @@ Object Object::Tuple(Objects elements) {
     return Object(std::make_shared<TupleObject>(std::move(elements)));
 }
 
+Object Object::Struct(const detail::StructTypeNode& type, const Objects& fields) {
+    return Object(std::make_shared<StructObject>(type, fields));
+}
+
 Object Object::List(Objects elements, Maybe<Type> declared_element_type) {
     return Object(std::make_shared<ListObject>(std::move(elements), std::move(declared_element_type)));
 }
@@ -899,6 +1022,13 @@ Object Object::Deserialize(const std::string& serialized) {
             elements.push_back(Deserialize(inner.substr(start)));
         }
         return Object::Tuple(std::move(elements));
+    } else if (kind_str == "struct") {
+        if (data.size() < 2 || data.front() != '{' || data.back() != '}') {
+            throw std::invalid_argument("Invalid struct serialization");
+        }
+        // TODO: Serialize/Deserialize
+        std::string inner = data.substr(1, data.size() - 2);
+
     } else if (kind_str == "list") {
         size_t bracket_pos = data.find('[');
         size_t bracket_end = data.find(']', bracket_pos);
@@ -982,6 +1112,13 @@ size_t Object::Hash() const noexcept {
             }
             return h;
         }
+        case ObjectKind::Struct: {
+            for (const auto& field : As<StructObject>()->fields()) {
+                h = HashCombine(h, field.Hash());
+            }
+            h = HashCombine(h, std::hash<std::string>{}(As<StructObject>()->name()));
+            return h;
+        }
         case ObjectKind::List: {
             auto list_obj = As<ListObject>();
             h = HashCombine(h, list_obj->element_type().Hash());
@@ -1030,6 +1167,19 @@ bool operator==(const Object& lhs, const Object& rhs) noexcept {
             }
             for (size_t i = 0; i < lhs_elems.size(); ++i) {
                 if (lhs_elems[i] != rhs_elems[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        case ObjectKind::Struct: {
+            const auto& lhs_fields = lhs.As<StructObject>()->fields();
+            const auto& rhs_fields = rhs.As<StructObject>()->fields();
+            if (lhs_fields.size() != rhs_fields.size()) {
+                return false;
+            }
+            for (size_t i = 0; i < lhs_fields.size(); ++i) {
+                if (lhs_fields[i] != rhs_fields[i]) {
                     return false;
                 }
             }
@@ -1111,6 +1261,27 @@ bool IsInstanceOf(const Object& object, const Type& type) noexcept {
             }
             return true;
         }
+        case TypeKind::Struct: {
+            auto struct_object = object.As<StructObject>();
+            if (!struct_object) {
+                return false;
+            }
+            const auto& struct_type = type.StructName();
+            if (struct_object->name() != struct_type) {
+                return false;
+            }
+            const auto& fields = struct_object->fields();
+            const auto& field_types = type.StructFields();
+            if (fields.size() != field_types.size()) {
+                return false;
+            }
+            for (size_t i = 0; i < fields.size(); ++i) {
+                if (!field_types[i].second.Accepts(fields[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
         case TypeKind::List: {
             auto list_object = object.As<ListObject>();
             if (!list_object) {
@@ -1154,6 +1325,8 @@ std::string ToString(TypeKind kind) {
             return "string";
         case TypeKind::Tuple:
             return "tuple";
+        case TypeKind::Struct:
+            return "struct";
         case TypeKind::List:
             return "list";
         case TypeKind::Channel:
@@ -1178,6 +1351,8 @@ std::string ToString(ObjectKind kind) {
             return "string";
         case ObjectKind::Tuple:
             return "tuple";
+        case ObjectKind::Struct:
+            return "struct";
         case ObjectKind::List:
             return "list";
         case ObjectKind::Algebraic:

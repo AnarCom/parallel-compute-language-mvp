@@ -57,9 +57,9 @@ NIL_LIT     : 'nil' -> mode(NLSEMI);
 RETURN      : 'return' -> mode(NLSEMI);
 SYNC        : 'sync';  // New keyword
 //SELECT      : 'select';
-//STRUCT      : 'struct';
+STRUCT      : 'struct';
 //SWITCH      : 'switch';
-//TYPE        : 'type';
+TYPE        : 'type';
 VAR         : 'var';
 
 IDENTIFIER: LETTER (LETTER | UNICODE_DIGIT)* -> mode(NLSEMI);
@@ -76,7 +76,7 @@ ASSIGN         : '=';
 COMMA          : ',';
 SEMI           : ';';
 COLON          : ':';
-//DOT            : '.';
+DOT            : '.';
 PLUS_PLUS      : '++' -> mode(NLSEMI);
 MINUS_MINUS    : '--' -> mode(NLSEMI);
 DECLARE_ASSIGN : ':=';
